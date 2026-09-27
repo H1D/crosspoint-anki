@@ -1499,6 +1499,7 @@ void CrossPointWebServer::handleGetAnkiAccounts() const {
     JsonArray decks = doc["decks"].to<JsonArray>();
     for (const std::string& d : a.decks) decks.add(d);
     doc["cacheSize"] = a.cacheSize;
+    doc["defaultDeck"] = a.lastDeck;  // deck for new words
     // Deck names cached by the last sync, for the web deck picker
     JsonArray available = doc["availableDecks"].to<JsonArray>();
     for (const AnkiDeck& d : engine.loadDecks(a.id)) available.add(d.name);
@@ -1561,6 +1562,10 @@ void CrossPointWebServer::handlePostAnkiAccount() {
   // Token is optional: the web UI omits it when the user left the field empty
   if (!readString("token", account.token, MAX_TOKEN)) {
     server->send(400, "text/plain", "Token too long");
+    return;
+  }
+  if (!readString("defaultDeck", account.lastDeck, MAX_DECK)) {
+    server->send(400, "text/plain", "Deck name too long");
     return;
   }
   if (doc["enabled"].is<bool>()) account.enabled = doc["enabled"].as<bool>();

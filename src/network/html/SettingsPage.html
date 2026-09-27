@@ -842,6 +842,13 @@
       const sel = decks.indexOf(d) !== -1 ? ' selected' : '';
       deckOptions += '<option value="' + escapeHtml(d) + '"' + sel + '>' + escapeHtml(d) + '</option>';
     });
+    const current = acc.defaultDeck || '';
+    let defaultOptions = '<option value=""' + (current ? '' : ' selected') + '>(not set)</option>';
+    const defaultList = available.slice();
+    if (current && defaultList.indexOf(current) === -1) defaultList.push(current);
+    defaultList.forEach(function(d) {
+      defaultOptions += '<option value="' + escapeHtml(d) + '"' + (d === current ? ' selected' : '') + '>' + escapeHtml(d) + '</option>';
+    });
     const deckControl = available.length === 0
       ? '<input type="text" id="anki-deckadd-' + id + '" placeholder="All decks (or names, comma-separated)">'
       : '<select multiple id="anki-decks-' + id + '" size="' + Math.min(available.length, 6) + '">' + deckOptions + '</select>' +
@@ -870,6 +877,10 @@
       '<div class="setting-row">' +
         '<span class="setting-name">Decks</span>' +
         '<span class="setting-control">' + deckControl + '</span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Deck for new words</span>' +
+        '<span class="setting-control"><select id="anki-defdeck-' + id + '">' + defaultOptions + '</select></span>' +
       '</div>' +
       '<div class="setting-row">' +
         '<span class="setting-name">Note type</span>' +
@@ -941,6 +952,7 @@
       profile: document.getElementById('anki-profile-' + id).value,
       enabled: document.getElementById('anki-enabled-' + id).checked,
       decks: decks,
+      defaultDeck: document.getElementById('anki-defdeck-' + id).value,
       model: document.getElementById('anki-model-' + id).value,
       cacheSize: parseInt(document.getElementById('anki-cache-' + id).value, 10) || 60,
     };

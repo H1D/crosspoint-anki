@@ -23,6 +23,7 @@ enum Row : int {
   ROW_TOKEN,
   ROW_ENABLED,
   ROW_DECKS,
+  ROW_DEFAULT_DECK,
   ROW_MODEL,
   ROW_CACHE_SIZE,
   ROW_DELETE,
@@ -45,8 +46,9 @@ AnkiAccountActivity::AnkiAccountActivity(GfxRenderer& renderer, MappedInputManag
   // Labels never change (the values track editAccount live), so they're set
   // once here rather than every buildScreen() call.
   static constexpr StrId fieldNames[BASE_ITEMS] = {
-      StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_SERVER_URL, StrId::STR_ANKI_PROFILE,   StrId::STR_ANKI_TOKEN,
-      StrId::STR_ANKI_ENABLED,      StrId::STR_ANKI_DECKS,      StrId::STR_ANKI_NOTE_TYPE, StrId::STR_ANKI_CACHE_SIZE};
+      StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_SERVER_URL, StrId::STR_ANKI_PROFILE,
+      StrId::STR_ANKI_TOKEN,        StrId::STR_ANKI_ENABLED,    StrId::STR_ANKI_DECKS,
+      StrId::STR_ANKI_DEFAULT_DECK, StrId::STR_ANKI_NOTE_TYPE,  StrId::STR_ANKI_CACHE_SIZE};
   for (int i = 0; i < BASE_ITEMS; i++) {
     fieldRowItems[i].label = I18N.get(fieldNames[i]);
     fieldRowItems[i].actionValue = static_cast<int16_t>(i);
@@ -164,6 +166,44 @@ void AnkiAccountActivity::openDeckPicker() {
   });
 }
 
+void AnkiAccountActivity::saveDefaultDeck(const std::string& deck) {
+  if (!ANKI_STORE.setLastDeck(static_cast<size_t>(accountIndex), deck)) {
+    LOG_ERR("ANKI", "Failed to save default deck for account %d", accountIndex);
+    showSaveError = true;
+  }
+  reloadFromStore();
+  requestUpdate();
+}
+
+void AnkiAccountActivity::openDefaultDeckPicker() {
+  // setLastDeck() addresses the stored account, so a new one is saved first.
+  if (isNewAccount && !saveAccount()) return;
+  if (!AnkiDeckSelectActivity::hasCachedDecks(editAccount.id)) {
+    // Nothing cached yet (no sync so far): let the user type the deck name.
+    auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ANKI_DEFAULT_DECK),
+                                                             editAccount.lastDeck, 100, InputType::Text);
+    if (!keyboard) {
+      LOG_ERR("ANKI", "OOM: keyboard");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
+      if (result.isCancelled) return;
+      saveDefaultDeck(std::get<KeyboardResult>(result.data).text);
+    });
+    return;
+  }
+  auto picker = makeUniqueNoThrow<AnkiDeckSelectActivity>(renderer, mappedInput, accountIndex,
+                                                          AnkiDeckSelectActivity::Mode::Single);
+  if (!picker) {
+    LOG_ERR("ANKI", "OOM: deck picker");
+    return;
+  }
+  startActivityForResult(std::move(picker), [this](const ActivityResult& result) {
+    if (result.isCancelled || !std::holds_alternative<KeyboardResult>(result.data)) return;
+    saveDefaultDeck(std::get<KeyboardResult>(result.data).text);
+  });
+}
+
 void AnkiAccountActivity::handleSelection() {
   // Each field edit is saved immediately so partially configured accounts
   // survive navigation and power loss.
@@ -188,6 +228,9 @@ void AnkiAccountActivity::handleSelection() {
       break;
     case ROW_DECKS:
       openDeckPicker();
+      break;
+    case ROW_DEFAULT_DECK:
+      openDefaultDeckPicker();
       break;
     case ROW_MODEL:
       editText(StrId::STR_ANKI_NOTE_TYPE, &AnkiAccount::model, 63, InputType::Text);
@@ -251,6 +294,7 @@ void AnkiAccountActivity::buildScreen(UiScreen& screen) {
     snprintf(deckCountBuf, sizeof(deckCountBuf), "%u", static_cast<unsigned>(editAccount.decks.size()));
     fieldRowItems[ROW_DECKS].value = deckCountBuf;
   }
+  fieldRowItems[ROW_DEFAULT_DECK].value = editAccount.lastDeck.empty() ? tr(STR_NOT_SET) : editAccount.lastDeck.c_str();
   fieldRowItems[ROW_MODEL].value = editAccount.model.empty() ? tr(STR_NOT_SET) : editAccount.model.c_str();
   snprintf(cacheSizeBuf, sizeof(cacheSizeBuf), "%u", static_cast<unsigned>(editAccount.cacheSize));
   fieldRowItems[ROW_CACHE_SIZE].value = cacheSizeBuf;

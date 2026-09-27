@@ -26,8 +26,8 @@ constexpr unsigned long POPUP_DURATION_MS = 1200;
 constexpr int BODY_GAP = 6;  // vertical gap between the word, sentence and translation blocks
 constexpr const char* DEFAULT_DECK = "Default";
 
-// Account preselected on the next open, across modals; the deck lives in the
-// store per account (AnkiAccount::lastDeck).
+// Account preselected on the next open, across modals; the deck preselect is
+// the account's "Deck for new words" setting (AnkiAccount::lastDeck).
 uint32_t lastAccountId = 0;
 
 }  // namespace
@@ -149,9 +149,8 @@ void AnkiAddNoteActivity::addNote() {
   if (!bookTitle.empty()) note.tags.push_back(ankinote::bookTag(bookTitle));
 
   if (queue.append(note)) {
-    // setLastDeck saves the store; `account` may be invalidated by that, so
-    // everything read from it is captured above.
-    ANKI_STORE.setLastDeck(accountIndices[static_cast<size_t>(accountPos)], deck);
+    // A deck picked here is a one-off; account.lastDeck is the user's setting
+    // ("Deck for new words") and is never written from the modal.
     lastAccountId = accountId;
     snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED), static_cast<int>(queue.count()));
     popup = Popup::Queued;

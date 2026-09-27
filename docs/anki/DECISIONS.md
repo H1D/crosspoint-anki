@@ -181,3 +181,8 @@ whole afterwards.
   and the web "Review" radio are gone; `reviewAccount` in anki.json now means
   "last reviewed" and is written by the picker, so exit- and sleep-entry syncs
   refresh that account's queue.
+- **Default deck is a setting (2026-09-27, reversed).** The add-word modal
+  used to preselect the deck last chosen in the modal and overwrite it on
+  every add. Now each account has an explicit "Deck for new words" setting
+  (device editor and web card); the modal preselects it and a different pick
+  in the modal is a one-off. The JSON key stays `lastDeck` for compatibility.

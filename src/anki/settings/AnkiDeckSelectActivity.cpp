@@ -8,6 +8,7 @@
 #include <algorithm>
 
 #include "MappedInputManager.h"
+#include "activities/ActivityResult.h"
 #include "anki/AnkiAccountStore.h"
 #include "anki/AnkiSecureHttp.h"
 #include "anki/AnkiStorageFs.h"
@@ -15,9 +16,19 @@
 
 namespace fui = freeink::ui;
 
+namespace {
+// Cached deck list from the last sync (no network; the clock is unused).
+std::vector<AnkiDeck> cachedDecks(const uint32_t accountId) {
+  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), nullptr);
+  return engine.loadDecks(accountId);
+}
+}  // namespace
+
 AnkiDeckSelectActivity::AnkiDeckSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                               const int accountIndex)
-    : UiListActivity("AnkiDeckSelect", renderer, mappedInput), accountIndex(accountIndex) {}
+                                               const int accountIndex, const Mode mode)
+    : UiListActivity("AnkiDeckSelect", renderer, mappedInput), accountIndex(accountIndex), mode(mode) {}
+
+bool AnkiDeckSelectActivity::hasCachedDecks(const uint32_t accountId) { return !cachedDecks(accountId).empty(); }
 
 void AnkiDeckSelectActivity::onEnter() {
   UiListActivity::onEnter();
@@ -32,35 +43,43 @@ void AnkiDeckSelectActivity::onEnter() {
     LOG_ERR("ANKI", "Deck picker: no account at index %d", accountIndex);
     return;
   }
-  selected_ = account->decks;
+  if (mode == Mode::Multi) {
+    selected_ = account->decks;
+  } else if (!account->lastDeck.empty()) {
+    selected_.push_back(account->lastDeck);
+  }
 
-  // Cached deck list from the last sync (no network here; the clock is unused).
-  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), nullptr);
-  std::vector<AnkiDeck> decks = engine.loadDecks(account->id);
+  std::vector<AnkiDeck> decks = cachedDecks(account->id);
   names_.reserve(decks.size() + selected_.size());
   for (AnkiDeck& d : decks) {
     if (!d.name.empty()) names_.push_back(std::move(d.name));
   }
-  // Selected decks the cache does not know keep a row so they can be unticked.
+  // Selected decks the cache does not know keep a row so they can be changed.
   for (const std::string& s : selected_) {
     if (std::find(names_.begin(), names_.end(), s) == names_.end()) names_.push_back(s);
   }
   if (names_.empty()) return;  // empty state drawn by buildScreen()
 
+  const bool multi = mode == Mode::Multi;
   rowItems_.reserve(names_.size() + 1);
-  fui::ListItem all;
-  all.label = tr(STR_ANKI_ALL_DECKS);
-  all.toggle = true;
-  all.actionValue = 0;
-  rowItems_.push_back(all);
+  fui::ListItem none;
+  none.label = multi ? tr(STR_ANKI_ALL_DECKS) : tr(STR_NOT_SET);
+  none.toggle = multi;
+  none.actionValue = 0;
+  rowItems_.push_back(none);
   for (size_t i = 0; i < names_.size(); i++) {
     fui::ListItem item;
     item.label = names_[i].c_str();
-    item.toggle = true;
+    item.toggle = multi;
     item.actionValue = static_cast<int16_t>(i + 1);
     rowItems_.push_back(item);
   }
   refreshChecks();
+  // Single mode opens on the current choice.
+  if (!multi && !selected_.empty()) {
+    const auto it = std::find(names_.begin(), names_.end(), selected_.front());
+    if (it != names_.end()) nav.selected = static_cast<int>(it - names_.begin()) + 1;
+  }
 }
 
 bool AnkiDeckSelectActivity::isSelected(const std::string& name) const {
@@ -68,18 +87,32 @@ bool AnkiDeckSelectActivity::isSelected(const std::string& name) const {
 }
 
 void AnkiDeckSelectActivity::refreshChecks() {
-  if (rowItems_.empty()) return;
+  if (rowItems_.empty() || mode != Mode::Multi) return;
   rowItems_[0].toggleChecked = selected_.empty();
   for (size_t i = 0; i < names_.size(); i++) {
     rowItems_[i + 1].toggleChecked = isSelected(names_[i]);
   }
 }
 
-const char* AnkiDeckSelectActivity::headerTitle() const { return tr(STR_ANKI_DECKS); }
+const char* AnkiDeckSelectActivity::headerTitle() const {
+  return mode == Mode::Multi ? tr(STR_ANKI_DECKS) : tr(STR_ANKI_DEFAULT_DECK);
+}
+
+void AnkiDeckSelectActivity::returnSingle(const std::string& name) {
+  // Leaving the screen; a lingering flash would gray a row on the editor.
+  app.clearTapFlash();
+  setResult(KeyboardResult{name});
+  finish();
+}
 
 void AnkiDeckSelectActivity::activateIndex(const int index) {
   nav.selected = index;
   if (index < 0 || index >= static_cast<int>(rowItems_.size())) return;
+
+  if (mode == Mode::Single) {
+    returnSingle(index == 0 ? std::string() : names_[static_cast<size_t>(index - 1)]);
+    return;
+  }
 
   if (index == 0) {
     selected_.clear();
@@ -98,7 +131,11 @@ void AnkiDeckSelectActivity::activateIndex(const int index) {
 }
 
 void AnkiDeckSelectActivity::onBackButton() {
-  if (dirty && accountIndex >= 0) {
+  if (mode == Mode::Single) {
+    ActivityResult cancelled;
+    cancelled.isCancelled = true;
+    setResult(std::move(cancelled));
+  } else if (dirty && accountIndex >= 0) {
     const AnkiAccount* stored = ANKI_STORE.getAccount(static_cast<size_t>(accountIndex));
     if (stored) {
       AnkiAccount account = *stored;

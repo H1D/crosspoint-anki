@@ -43,11 +43,13 @@ class AnkiAccountActivity final : public UiListActivity {
   void reloadFromStore();
   void editText(StrId titleId, std::string AnkiAccount::* field, size_t maxLength, InputType type);
   void openDeckPicker();
+  void openDefaultDeckPicker();
+  void saveDefaultDeck(const std::string& deck);
 
-  // Row storage: Name, URL, Profile, Token, Enabled, Decks, Note type,
+  // Row storage: Name, URL, Profile, Token, Enabled, Decks, Deck for new words, Note type,
   // Cards per sync + Delete (existing accounts only). Labels are
   // set once in the constructor; buildScreen() only refreshes the values.
-  static constexpr int BASE_ITEMS = 8;
+  static constexpr int BASE_ITEMS = 9;
   static constexpr int MAX_MENU_ITEMS = BASE_ITEMS + 1;
   freeink::ui::ListItem fieldRowItems[MAX_MENU_ITEMS]{};
   // Numeric values rendered into fixed buffers (no per-render allocation).
