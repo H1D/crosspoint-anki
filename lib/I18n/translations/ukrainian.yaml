@@ -495,3 +495,5 @@ STR_ANKI_NO_REVIEW_ACCOUNT: "Виберіть обліковий запис дл
 STR_ANKI_SYNC_ON_EXIT: "Надсилання відповідей..."
 STR_ANKI_MENU_SYNC: "Синхронізація з AnkiDo"
 STR_ANKI_REVIEW_MARK: "Повторення"
+STR_ANKI_PICK_ACCOUNT: "Який обліковий запис?"
+STR_ANKI_PICKER_HINT: "Вимкніть облікові записи в налаштуваннях, щоб пропустити цей крок"

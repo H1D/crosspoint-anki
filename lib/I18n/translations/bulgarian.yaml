@@ -483,3 +483,5 @@ STR_ANKI_NO_REVIEW_ACCOUNT: "Изберете акаунт за преговор
 STR_ANKI_SYNC_ON_EXIT: "Изпращане на чакащите отговори..."
 STR_ANKI_MENU_SYNC: "Синхронизация с AnkiDo"
 STR_ANKI_REVIEW_MARK: "Преговор"
+STR_ANKI_PICK_ACCOUNT: "Кой акаунт?"
+STR_ANKI_PICKER_HINT: "Изключете акаунти от Настройки, за да пропуснете тази стъпка"

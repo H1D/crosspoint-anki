@@ -1472,7 +1472,6 @@ void CrossPointWebServer::handleGetAnkiAccounts() const {
   // Reload so edits made on the device screens show up without a restart
   ANKI_STORE.loadFromFile();
   const auto& accounts = ANKI_STORE.getAccounts();
-  const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
   AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), nullptr);
 
   // Stream JSON array incrementally to avoid allocating the full response in memory
@@ -1500,8 +1499,6 @@ void CrossPointWebServer::handleGetAnkiAccounts() const {
     JsonArray decks = doc["decks"].to<JsonArray>();
     for (const std::string& d : a.decks) decks.add(d);
     doc["cacheSize"] = a.cacheSize;
-    doc["maxNewPerDay"] = a.maxNewPerDay;
-    doc["isReview"] = static_cast<int>(i) == reviewIdx;
     // Deck names cached by the last sync, for the web deck picker
     JsonArray available = doc["availableDecks"].to<JsonArray>();
     for (const AnkiDeck& d : engine.loadDecks(a.id)) available.add(d.name);
@@ -1582,10 +1579,8 @@ void CrossPointWebServer::handlePostAnkiAccount() {
   if (doc["cacheSize"].is<int>()) {
     account.cacheSize = static_cast<uint8_t>(std::clamp(doc["cacheSize"].as<int>(), 1, 200));
   }
-  if (doc["maxNewPerDay"].is<int>()) {
-    account.maxNewPerDay = static_cast<uint8_t>(std::clamp(doc["maxNewPerDay"].as<int>(), 0, 255));
-  }
-  const bool makeReview = doc["isReview"].is<bool>() && doc["isReview"].as<bool>();
+  // "maxNewPerDay" from older clients is accepted and ignored.
+  // "isReview" from older clients is accepted and ignored: the review app picks the account.
 
   if (isUpdate) {
     if (!ANKI_STORE.updateAccount(static_cast<size_t>(idx), account)) {
@@ -1601,7 +1596,6 @@ void CrossPointWebServer::handlePostAnkiAccount() {
     idx = static_cast<int>(ANKI_STORE.getCount()) - 1;
     LOG_DBG("WEB", "Added new Anki account: %s", account.name.c_str());
   }
-  if (makeReview) ANKI_STORE.setReviewAccount(static_cast<size_t>(idx));
 
   server->send(200, "text/plain", "OK");
 }

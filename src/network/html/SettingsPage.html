@@ -868,10 +868,6 @@
         '<span class="setting-control"><input type="checkbox" id="anki-enabled-' + id + '"' + (acc.enabled !== false ? ' checked' : '') + '></span>' +
       '</div>' +
       '<div class="setting-row">' +
-        '<span class="setting-name">Review this account</span>' +
-        '<span class="setting-control"><input type="radio" name="anki-review" id="anki-review-' + id + '"' + (acc.isReview ? ' checked' : '') + '></span>' +
-      '</div>' +
-      '<div class="setting-row">' +
         '<span class="setting-name">Decks</span>' +
         '<span class="setting-control">' + deckControl + '</span>' +
       '</div>' +
@@ -882,10 +878,6 @@
       '<div class="setting-row">' +
         '<span class="setting-name">Cards per sync</span>' +
         '<span class="setting-control"><input type="number" min="1" max="200" id="anki-cache-' + id + '" value="' + (acc.cacheSize || 60) + '"></span>' +
-      '</div>' +
-      '<div class="setting-row">' +
-        '<span class="setting-name">New cards per day (0 = no cap)</span>' +
-        '<span class="setting-control"><input type="number" min="0" max="255" id="anki-maxnew-' + id + '" value="' + (acc.maxNewPerDay === undefined ? 10 : acc.maxNewPerDay) + '"></span>' +
       '</div>' +
       '<div class="opds-actions">' +
         '<button class="btn-small btn-save-server" onclick="saveAnkiAccount(' + idx + ')">Save</button>' +
@@ -930,7 +922,7 @@
     // Prevent multiple unsaved new-account forms at once (idx -1 -> id "new")
     if (document.getElementById('anki-new')) return;
     addBtn.insertAdjacentHTML('beforebegin',
-      renderAnkiAccount({name:'',url:'',profile:'',hasToken:false,enabled:true,isReview:ankiAccounts.length === 0,decks:[],availableDecks:[],model:'Basic',cacheSize:60,maxNewPerDay:10}, -1));
+      renderAnkiAccount({name:'',url:'',profile:'',hasToken:false,enabled:true,decks:[],availableDecks:[],model:'Basic',cacheSize:60}, -1));
   }
 
   async function saveAnkiAccount(idx) {
@@ -948,11 +940,9 @@
       url: document.getElementById('anki-url-' + id).value,
       profile: document.getElementById('anki-profile-' + id).value,
       enabled: document.getElementById('anki-enabled-' + id).checked,
-      isReview: document.getElementById('anki-review-' + id).checked,
       decks: decks,
       model: document.getElementById('anki-model-' + id).value,
       cacheSize: parseInt(document.getElementById('anki-cache-' + id).value, 10) || 60,
-      maxNewPerDay: parseInt(document.getElementById('anki-maxnew-' + id).value, 10) || 0,
     };
     // Only include the token when the user typed one; omitting it keeps the stored token.
     const token = document.getElementById('anki-token-' + id).value;

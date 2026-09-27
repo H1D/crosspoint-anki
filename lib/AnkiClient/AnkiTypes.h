@@ -17,7 +17,7 @@ struct AnkiAccount {
   std::string model = "Basic";     // note type used by add-word
   std::vector<std::string> decks;  // decks to review; empty = all
   uint8_t cacheSize = 60;          // cards per exchange, 1..200
-  uint8_t maxNewPerDay = 10;       // 0 = no cap
+  uint8_t maxNewPerDay = 0;        // per-fetch cap; 0 = none (deck options apply server-side)
   std::string lastDeck;            // last deck used by add-word
 
   std::string apiBase() const { return url + "/v1/p/" + profile; }

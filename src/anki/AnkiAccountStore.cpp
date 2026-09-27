@@ -32,7 +32,6 @@ void AnkiAccountStore::toJson(JsonDocument& doc) const {
     JsonArray decks = obj["decks"].to<JsonArray>();
     for (const auto& d : a.decks) decks.add(d);
     obj["cacheSize"] = a.cacheSize;
-    obj["maxNewPerDay"] = a.maxNewPerDay;
     obj["lastDeck"] = a.lastDeck;
   }
 }
@@ -63,7 +62,8 @@ bool AnkiAccountStore::fromJson(JsonVariantConst doc) {
     if (a.model.empty()) a.model = "Basic";
     a.cacheSize = static_cast<uint8_t>(std::min<int>(obj["cacheSize"] | 60, 200));
     if (a.cacheSize == 0) a.cacheSize = 60;
-    a.maxNewPerDay = static_cast<uint8_t>(std::min<int>(obj["maxNewPerDay"] | 10, 200));
+    // Not read: per-day limits are Anki deck options; 0 = no fetch cap.
+    a.maxNewPerDay = 0;
     a.lastDeck = obj["lastDeck"] | "";
     JsonArrayConst decks = obj["decks"].as<JsonArrayConst>();
     a.decks.reserve(decks.size());
@@ -104,6 +104,7 @@ bool AnkiAccountStore::addAccount(AnkiAccount& account) {
     return false;
   }
   account.id = nextId++;
+  account.maxNewPerDay = 0;  // deck limits are applied server-side
   account.url = trimSlash(account.url);
   if (account.model.empty()) account.model = "Basic";
   // nextId lives only in anki.json: if that file was lost while the data

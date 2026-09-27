@@ -30,7 +30,6 @@ void AnkiSettingsActivity::rebuildRowItems() {
 
   const auto& accounts = ANKI_STORE.getAccounts();
   const auto accountCount = static_cast<int>(accounts.size());
-  const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
   rowItems_.reserve(accountCount + 1);
   subtitles_.reserve(accountCount);
 
@@ -42,7 +41,6 @@ void AnkiSettingsActivity::rebuildRowItems() {
     fui::ListItem item;
     item.label = !a.name.empty() ? a.name.c_str() : !a.url.empty() ? a.url.c_str() : tr(STR_NOT_SET);
     if (!subtitles_.back().empty()) item.subtitle = subtitles_.back().c_str();
-    if (i == reviewIdx) item.value = tr(STR_ANKI_REVIEW_MARK);
     item.actionValue = static_cast<int16_t>(i);
     rowItems_.push_back(item);
   }

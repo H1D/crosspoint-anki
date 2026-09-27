@@ -22,19 +22,15 @@ enum Row : int {
   ROW_PROFILE,
   ROW_TOKEN,
   ROW_ENABLED,
-  ROW_REVIEW,
   ROW_DECKS,
   ROW_MODEL,
   ROW_CACHE_SIZE,
-  ROW_MAX_NEW,
   ROW_DELETE,
 };
 
-// OptionPopup choices for the two numeric fields (labels and values in step).
+// OptionPopup choices for the cache size (labels and values in step).
 constexpr const char* CACHE_SIZE_LABELS[] = {"20", "40", "60", "100"};
 constexpr uint8_t CACHE_SIZE_VALUES[] = {20, 40, 60, 100};
-constexpr const char* MAX_NEW_LABELS[] = {"0", "5", "10", "20", "50"};
-constexpr uint8_t MAX_NEW_VALUES[] = {0, 5, 10, 20, 50};
 
 int indexOfValue(const uint8_t* values, const int count, const uint8_t value) {
   for (int i = 0; i < count; i++) {
@@ -49,15 +45,13 @@ AnkiAccountActivity::AnkiAccountActivity(GfxRenderer& renderer, MappedInputManag
   // Labels never change (the values track editAccount live), so they're set
   // once here rather than every buildScreen() call.
   static constexpr StrId fieldNames[BASE_ITEMS] = {
-      StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_SERVER_URL,     StrId::STR_ANKI_PROFILE, StrId::STR_ANKI_TOKEN,
-      StrId::STR_ANKI_ENABLED,      StrId::STR_ANKI_REVIEW_ACCOUNT, StrId::STR_ANKI_DECKS,   StrId::STR_ANKI_NOTE_TYPE,
-      StrId::STR_ANKI_CACHE_SIZE,   StrId::STR_ANKI_MAX_NEW};
+      StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_SERVER_URL, StrId::STR_ANKI_PROFILE,   StrId::STR_ANKI_TOKEN,
+      StrId::STR_ANKI_ENABLED,      StrId::STR_ANKI_DECKS,      StrId::STR_ANKI_NOTE_TYPE, StrId::STR_ANKI_CACHE_SIZE};
   for (int i = 0; i < BASE_ITEMS; i++) {
     fieldRowItems[i].label = I18N.get(fieldNames[i]);
     fieldRowItems[i].actionValue = static_cast<int16_t>(i);
   }
   fieldRowItems[ROW_ENABLED].toggle = true;
-  fieldRowItems[ROW_REVIEW].toggle = true;
   fieldRowItems[ROW_DELETE].label = tr(STR_ANKI_DELETE_ACCOUNT);
   fieldRowItems[ROW_DELETE].actionValue = static_cast<int16_t>(ROW_DELETE);
 }
@@ -192,16 +186,6 @@ void AnkiAccountActivity::handleSelection() {
       saveAccount();
       requestUpdate();
       break;
-    case ROW_REVIEW: {
-      // There is always exactly one review account; a row can only be turned on.
-      if (!isNewAccount && ANKI_STORE.getReviewAccountIndex() == accountIndex) break;
-      if (saveAccount() && !ANKI_STORE.setReviewAccount(static_cast<size_t>(accountIndex))) {
-        LOG_ERR("ANKI", "Failed to set review account %d", accountIndex);
-        showSaveError = true;
-      }
-      requestUpdate();
-      break;
-    }
     case ROW_DECKS:
       openDeckPicker();
       break;
@@ -213,16 +197,6 @@ void AnkiAccountActivity::handleSelection() {
       optionPopup.show(tr(STR_ANKI_CACHE_SIZE), CACHE_SIZE_LABELS, count,
                        indexOfValue(CACHE_SIZE_VALUES, count, editAccount.cacheSize), [this](int idx) {
                          editAccount.cacheSize = CACHE_SIZE_VALUES[idx];
-                         saveAccount();
-                       });
-      requestUpdate();
-      break;
-    }
-    case ROW_MAX_NEW: {
-      constexpr int count = static_cast<int>(sizeof(MAX_NEW_VALUES) / sizeof(MAX_NEW_VALUES[0]));
-      optionPopup.show(tr(STR_ANKI_MAX_NEW), MAX_NEW_LABELS, count,
-                       indexOfValue(MAX_NEW_VALUES, count, editAccount.maxNewPerDay), [this](int idx) {
-                         editAccount.maxNewPerDay = MAX_NEW_VALUES[idx];
                          saveAccount();
                        });
       requestUpdate();
@@ -268,7 +242,6 @@ void AnkiAccountActivity::buildScreen(UiScreen& screen) {
   fieldRowItems[ROW_PROFILE].value = editAccount.profile.empty() ? tr(STR_NOT_SET) : editAccount.profile.c_str();
   fieldRowItems[ROW_TOKEN].value = editAccount.token.empty() ? tr(STR_NOT_SET) : "******";
   fieldRowItems[ROW_ENABLED].toggleChecked = editAccount.enabled;
-  fieldRowItems[ROW_REVIEW].toggleChecked = !isNewAccount && ANKI_STORE.getReviewAccountIndex() == accountIndex;
   if (editAccount.decks.empty()) {
     fieldRowItems[ROW_DECKS].value = tr(STR_ANKI_ALL_DECKS);
   } else {
@@ -278,8 +251,6 @@ void AnkiAccountActivity::buildScreen(UiScreen& screen) {
   fieldRowItems[ROW_MODEL].value = editAccount.model.empty() ? tr(STR_NOT_SET) : editAccount.model.c_str();
   snprintf(cacheSizeBuf, sizeof(cacheSizeBuf), "%u", static_cast<unsigned>(editAccount.cacheSize));
   fieldRowItems[ROW_CACHE_SIZE].value = cacheSizeBuf;
-  snprintf(maxNewBuf, sizeof(maxNewBuf), "%u", static_cast<unsigned>(editAccount.maxNewPerDay));
-  fieldRowItems[ROW_MAX_NEW].value = maxNewBuf;
 
   fui::ListProps props;
   props.items = fieldRowItems;

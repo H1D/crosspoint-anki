@@ -28,7 +28,7 @@ stay cheap.
 ## Accounts (2026-09-27)
 
 - One account entry = `name, url, profile, token, enabled, model, decks[],
-  cacheSize, maxNewPerDay`. Several entries may point at one AnkiDo instance.
+  cacheSize`. Several entries may point at one AnkiDo instance.
   Flat list, max 8 entries (same ceiling as OPDS servers).
 - Exactly one account is the **review account** (`reviewAccount` index). Add-word
   can target any enabled account; review uses only that one. Chosen in
@@ -166,3 +166,18 @@ whole afterwards.
   the next session re-sends nothing wrong. A sleep-entry sync started while
   the File Transfer hotspot is up drops the AP before that screen's own exit
   runs; sleep follows anyway.
+- **No per-device new-card cap (2026-09-27, reversed).** The plan had a
+  "New cards per day" setting per account. Anki's deck options already own
+  that limit and AnkiDo applies them server-side; AnkiDo's
+  `max_new_per_day` only caps a single fetch and forgets earlier fetches, so
+  the setting duplicated the deck option under a misleading name. Removed
+  from the device and web UI; the device sends no cap. The `maxNewPerDay`
+  field stays in the store (default 0 = none) so old files still load.
+- **Account picker instead of a fixed review account (2026-09-27, reversed).**
+  With more than one enabled account the review app asks which one to review
+  every time it opens (rows: account name, subtitle profile@url; a hint row
+  says that disabling accounts in Settings skips the question). With exactly
+  one enabled account it opens directly. The "Review this account" setting
+  and the web "Review" radio are gone; `reviewAccount` in anki.json now means
+  "last reviewed" and is written by the picker, so exit- and sleep-entry syncs
+  refresh that account's queue.

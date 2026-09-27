@@ -514,3 +514,5 @@ STR_ANKI_NO_REVIEW_ACCOUNT: "در تنظیمات حسابی برای مرور ا
 STR_ANKI_SYNC_ON_EXIT: "در حال ارسال مرورهای در انتظار..."
 STR_ANKI_MENU_SYNC: "همگام‌سازی با AnkiDo"
 STR_ANKI_REVIEW_MARK: "مرور"
+STR_ANKI_PICK_ACCOUNT: "کدام حساب؟"
+STR_ANKI_PICKER_HINT: "برای رد کردن این مرحله، حساب‌ها را در تنظیمات غیرفعال کنید"

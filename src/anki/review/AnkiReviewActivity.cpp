@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "AnkiAccountPickerActivity.h"
 #include "AnkiSyncActivity.h"
 #include "CrossPointSettings.h"
 #include "anki/AnkiAccountStore.h"
@@ -52,9 +53,36 @@ EpdFontFamily::Style AnkiReviewActivity::styleOf(const ankimarkup::Run& run) {
   return EpdFontFamily::REGULAR;
 }
 
+// One enabled account reviews directly; several ask which one every time the
+// app opens (the answer becomes the review account, which exit and sleep
+// syncs refresh).
 void AnkiReviewActivity::onEnter() {
   Activity::onEnter();
   ANKI_STORE.loadFromFile();
+  int enabledCount = 0;
+  int onlyEnabled = -1;
+  const auto& accounts = ANKI_STORE.getAccounts();
+  for (size_t i = 0; i < accounts.size(); i++) {
+    if (!accounts[i].enabled) continue;
+    enabledCount++;
+    onlyEnabled = static_cast<int>(i);
+  }
+  if (enabledCount > 1) {
+    auto picker = makeUniqueNoThrow<AnkiAccountPickerActivity>(renderer, mappedInput);
+    if (picker) {
+      startActivityForResult(std::move(picker), [this](const ActivityResult& result) {
+        if (result.isCancelled) {
+          activityManager.goHome(HomeMenuItem::ANKI);
+          return;
+        }
+        reload();
+      });
+      return;
+    }
+    LOG_ERR("ANKI", "OOM: account picker");
+  } else if (enabledCount == 1 && ANKI_STORE.getReviewAccountIndex() != onlyEnabled) {
+    ANKI_STORE.setReviewAccount(static_cast<size_t>(onlyEnabled));
+  }
   reload();
   requestUpdate();
 }
