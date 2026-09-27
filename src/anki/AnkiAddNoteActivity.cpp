@@ -3,7 +3,6 @@
 #include <AnkiNoteQueue.h>
 #include <AnkiPaths.h>
 #include <AnkiSyncEngine.h>
-#include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -15,147 +14,236 @@
 #include "AnkiDevice.h"
 #include "AnkiSecureHttp.h"
 #include "AnkiStorageFs.h"
-#include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
-#include "fontIds.h"
+
+namespace fui = freeink::ui;
 
 namespace {
 
 constexpr unsigned long POPUP_DURATION_MS = 1200;
-constexpr int BODY_GAP = 6;  // vertical gap between the word, sentence and translation blocks
 constexpr const char* DEFAULT_DECK = "Default";
 
-// Account preselected on the next open, across modals; the deck preselect is
-// the account's "Deck for new words" setting (AnkiAccount::lastDeck).
-uint32_t lastAccountId = 0;
+// Accounts checked on the last add, kept across modals (ids, so store edits
+// in between cannot re-target them). Empty until the first open.
+std::vector<uint32_t> checkedAccountIds;
+bool checkedInitialised = false;
+
+bool isChecked(const uint32_t id) {
+  return std::find(checkedAccountIds.begin(), checkedAccountIds.end(), id) != checkedAccountIds.end();
+}
+
+void setChecked(const uint32_t id, const bool checked) {
+  const auto it = std::find(checkedAccountIds.begin(), checkedAccountIds.end(), id);
+  if (checked && it == checkedAccountIds.end()) {
+    checkedAccountIds.push_back(id);
+  } else if (!checked && it != checkedAccountIds.end()) {
+    checkedAccountIds.erase(it);
+  }
+}
 
 }  // namespace
 
 void AnkiAddNoteActivity::onEnter() {
-  Activity::onEnter();
+  UiListActivity::onEnter();
+  nav.selected = 0;
+  popup = Popup::None;
   ANKI_STORE.loadFromFile();
-  loadAccounts();
-  loadDecks();
-
-  // Merge the note text into the SD font's advance table up front so the
-  // wrapping in render() measures from RAM instead of loading glyphs one
-  // overflow slot at a time (same as DictionaryWordSelectActivity).
-  const int fontId = SETTINGS.getReaderFontId();
-  std::string text;
-  text.reserve(noteWord.size() + sentence.size() + translation.size() + 2);
-  text.append(noteWord).push_back(' ');
-  text.append(sentence).push_back(' ');
-  text.append(translation);
-  constexpr uint8_t styleMask =
-      (1u << EpdFontFamily::REGULAR) | (1u << EpdFontFamily::BOLD) | (1u << EpdFontFamily::ITALIC);
-  renderer.ensureSdCardFontReady(fontId, text.c_str(), styleMask);
+  buildTargets();
+  refreshRows();
   requestUpdate();
 }
 
-void AnkiAddNoteActivity::loadAccounts() {
-  const auto& accounts = ANKI_STORE.getAccounts();
-  accountIndices.clear();
-  accountIndices.reserve(accounts.size());
-  for (size_t i = 0; i < accounts.size(); i++) {
-    if (accounts[i].enabled) accountIndices.push_back(i);
-  }
-  accountPos = accountIndices.empty() ? -1 : 0;
-  if (accountIndices.empty()) return;
-
-  // Last used, else the review account, else the first enabled one.
-  const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
-  int reviewPos = -1;
-  for (size_t p = 0; p < accountIndices.size(); p++) {
-    const AnkiAccount& a = accounts[accountIndices[p]];
-    if (lastAccountId != 0 && a.id == lastAccountId) {
-      accountPos = static_cast<int>(p);
-      return;
-    }
-    if (static_cast<int>(accountIndices[p]) == reviewIdx) reviewPos = static_cast<int>(p);
-  }
-  if (reviewPos >= 0) accountPos = reviewPos;
-}
-
-const AnkiAccount* AnkiAddNoteActivity::currentAccount() const {
-  if (accountPos < 0 || accountPos >= static_cast<int>(accountIndices.size())) return nullptr;
-  const auto& accounts = ANKI_STORE.getAccounts();
-  const size_t idx = accountIndices[static_cast<size_t>(accountPos)];
-  return idx < accounts.size() ? &accounts[idx] : nullptr;
-}
-
-void AnkiAddNoteActivity::loadDecks() {
-  deckNames.clear();
-  deckPos = 0;
-  decksFromSync = false;
-  const AnkiAccount* account = currentAccount();
-  if (!account) return;
-
+// Deck names for the row: the account's "deck for new words" first, then the
+// list cached by the last sync, then the configured review decks, else Default.
+std::vector<std::string> AnkiAddNoteActivity::deckChoices(const AnkiAccount& account) {
+  std::vector<std::string> decks;
   {
     AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), nullptr);
-    const std::vector<AnkiDeck> decks = engine.loadDecks(account->id);
-    deckNames.reserve(decks.size() + 1);
-    for (const AnkiDeck& d : decks) deckNames.push_back(d.name);
-    decksFromSync = !deckNames.empty();
+    const std::vector<AnkiDeck> cached = engine.loadDecks(account.id);
+    decks.reserve(cached.size() + 1);
+    for (const AnkiDeck& d : cached) {
+      if (!d.name.empty()) decks.push_back(d.name);
+    }
   }
-  if (deckNames.empty()) deckNames = account->decks;
-  // The remembered deck stays selectable even when the current list lacks it.
-  if (!account->lastDeck.empty() &&
-      std::find(deckNames.begin(), deckNames.end(), account->lastDeck) == deckNames.end()) {
-    deckNames.insert(deckNames.begin(), account->lastDeck);
+  if (decks.empty()) decks = account.decks;
+  if (!account.lastDeck.empty()) {
+    const auto it = std::find(decks.begin(), decks.end(), account.lastDeck);
+    if (it != decks.end()) decks.erase(it);
+    decks.insert(decks.begin(), account.lastDeck);
   }
-  if (deckNames.empty()) deckNames.emplace_back(DEFAULT_DECK);
-
-  if (!account->lastDeck.empty()) {
-    const auto it = std::find(deckNames.begin(), deckNames.end(), account->lastDeck);
-    if (it != deckNames.end()) deckPos = static_cast<int>(it - deckNames.begin());
-  }
+  if (decks.empty()) decks.emplace_back(DEFAULT_DECK);
+  return decks;
 }
 
-void AnkiAddNoteActivity::cycleAccount(const int direction) {
-  const int count = static_cast<int>(accountIndices.size());
-  if (count < 2) return;
-  accountPos = (accountPos + direction + count) % count;
-  loadDecks();
-  requestUpdate();
+void AnkiAddNoteActivity::buildTargets() {
+  targets.clear();
+  const auto& accounts = ANKI_STORE.getAccounts();
+  targets.reserve(accounts.size());
+  for (size_t i = 0; i < accounts.size(); i++) {
+    const AnkiAccount& a = accounts[i];
+    if (!a.enabled) continue;
+    Target t;
+    t.storeIndex = i;
+    t.id = a.id;
+    t.label = a.name.empty() ? a.url : a.name;
+    t.decks = deckChoices(a);
+    t.deckPos = 0;
+    t.checked = false;
+    targets.push_back(std::move(t));
+  }
+  if (targets.empty()) return;
+
+  // First open: the review account, else the first enabled one. Later opens
+  // reuse the remembered set; when none of it is still enabled, fall back the
+  // same way so Add never silently does nothing.
+  if (checkedInitialised) {
+    for (Target& t : targets) t.checked = isChecked(t.id);
+  }
+  if (!anyChecked()) {
+    const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
+    Target* pick = &targets.front();
+    for (Target& t : targets) {
+      if (static_cast<int>(t.storeIndex) == reviewIdx) pick = &t;
+    }
+    pick->checked = true;
+    checkedAccountIds.clear();
+    checkedAccountIds.push_back(pick->id);
+  }
+  checkedInitialised = true;
+}
+
+bool AnkiAddNoteActivity::anyChecked() const {
+  return std::any_of(targets.begin(), targets.end(), [](const Target& t) { return t.checked; });
+}
+
+void AnkiAddNoteActivity::refreshRows() {
+  rowItems.clear();
+  if (targets.empty()) return;
+  rowItems.reserve(targets.size() + 1);
+  for (size_t i = 0; i < targets.size(); i++) {
+    const Target& t = targets[i];
+    fui::ListItem item;
+    item.label = t.label.c_str();
+    item.subtitle = t.decks[static_cast<size_t>(t.deckPos)].c_str();
+    item.toggle = true;
+    item.toggleChecked = t.checked;
+    item.actionValue = static_cast<int16_t>(i);
+    rowItems.push_back(item);
+  }
+  fui::ListItem add;
+  add.label = tr(STR_ANKI_ADD);
+  add.actionValue = static_cast<int16_t>(targets.size());
+  rowItems.push_back(add);
+}
+
+const char* AnkiAddNoteActivity::headerTitle() const { return tr(STR_ANKI_ADD_TO_ANKI); }
+
+void AnkiAddNoteActivity::drawFooter() {
+  if (targets.empty()) {
+    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
+    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+    return;
+  }
+  // Front Left/Right cycle the highlighted row's deck; the side buttons move the selection.
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_ANKI_DECK), tr(STR_ANKI_DECK));
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void AnkiAddNoteActivity::cycleDeck(const int direction) {
-  const int count = static_cast<int>(deckNames.size());
+  const int index = nav.selected;
+  if (index < 0 || index >= static_cast<int>(targets.size())) return;
+  Target& t = targets[static_cast<size_t>(index)];
+  const int count = static_cast<int>(t.decks.size());
   if (count < 2) return;
-  deckPos = (deckPos + direction + count) % count;
+  t.deckPos = (t.deckPos + direction + count) % count;
+  refreshRows();
   requestUpdate();
 }
 
-void AnkiAddNoteActivity::addNote() {
-  const AnkiAccount* account = currentAccount();
-  if (!account || deckNames.empty()) return;
-  const std::string& deck = deckNames[static_cast<size_t>(deckPos)];
-  const uint32_t accountId = account->id;
+bool AnkiAddNoteActivity::handleCustomInput() {
+  if (popup != Popup::None) {
+    if (millis() - popupTime >= POPUP_DURATION_MS) {
+      if (popup == Popup::Queued) {
+        finish();
+        return true;
+      }
+      popup = Popup::None;
+      requestUpdate();
+    }
+    return true;
+  }
+  if (targets.empty()) return false;
+
+  // Front Left/Right are also NavPrevious/NavNext for the list; claim them for
+  // the whole press so the base navigator never sees them as row steps.
+  using Button = MappedInputManager::Button;
+  const bool left = mappedInput.wasReleased(Button::Left);
+  const bool right = mappedInput.wasReleased(Button::Right);
+  if (left || right || mappedInput.isPressed(Button::Left) || mappedInput.isPressed(Button::Right)) {
+    if (left) cycleDeck(-1);
+    if (right) cycleDeck(1);
+    return true;
+  }
+  return false;
+}
+
+void AnkiAddNoteActivity::activateIndex(const int index) {
+  nav.selected = index;
+  if (index < 0 || index >= static_cast<int>(rowItems.size())) return;
+  if (index < static_cast<int>(targets.size())) {
+    Target& t = targets[static_cast<size_t>(index)];
+    t.checked = !t.checked;
+    setChecked(t.id, t.checked);
+    refreshRows();
+    requestUpdate();
+    return;
+  }
+  queueNotes();
+}
+
+// One note per checked account, each with its own client id and that row's
+// deck. Nothing checked: the Add row is a no-op.
+void AnkiAddNoteActivity::queueNotes() {
+  if (!anyChecked()) return;
+  // Leaving the screen after the popup; a lingering flash would gray a row underneath.
+  app.clearTapFlash();
+
+  const std::string front = ankinote::frontHtml(noteWord, sentence);
+  std::vector<std::string> tags;
+  tags.reserve(2);
+  tags.emplace_back("crosspoint");
+  if (!bookTitle.empty()) tags.push_back(ankinote::bookTag(bookTitle));
 
   AnkiStorageFs& fs = AnkiStorageFs::instance();
-  // An account that never synced has no data directory yet.
-  fs.mkdirs(ankipaths::accountDir(accountId));
-  AnkiNoteQueue queue(fs, ankipaths::notesFile(accountId));
+  const auto& accounts = ANKI_STORE.getAccounts();
+  size_t pending = 0;
+  size_t failed = 0;
+  for (const Target& t : targets) {
+    if (!t.checked || t.storeIndex >= accounts.size()) continue;
+    const AnkiAccount& account = accounts[t.storeIndex];
+    // An account that never synced has no data directory yet.
+    fs.mkdirs(ankipaths::accountDir(t.id));
+    AnkiNoteQueue queue(fs, ankipaths::notesFile(t.id));
+    AnkiNoteQueue::Note note;
+    note.clientId = ankidevice::nextClientId();
+    note.deck = t.decks[static_cast<size_t>(t.deckPos)];
+    note.model = account.model;
+    note.front = front;
+    note.back = translation;
+    note.tags = tags;
+    if (queue.append(note)) {
+      pending += queue.count();
+    } else {
+      LOG_ERR("ANKI", "Failed to queue note for account %u", static_cast<unsigned>(t.id));
+      failed++;
+    }
+  }
 
-  AnkiNoteQueue::Note note;
-  note.clientId = ankidevice::nextClientId();
-  note.deck = deck;
-  note.model = account->model;
-  note.front = ankinote::frontHtml(noteWord, sentence);
-  note.back = translation;
-  note.tags.reserve(2);
-  note.tags.emplace_back("crosspoint");
-  if (!bookTitle.empty()) note.tags.push_back(ankinote::bookTag(bookTitle));
-
-  if (queue.append(note)) {
-    // A deck picked here is a one-off; account.lastDeck is the user's setting
-    // ("Deck for new words") and is never written from the modal.
-    lastAccountId = accountId;
-    snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED), static_cast<int>(queue.count()));
+  if (failed == 0) {
+    snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED), static_cast<int>(pending));
     popup = Popup::Queued;
   } else {
-    LOG_ERR("ANKI", "Failed to queue note for account %u", static_cast<unsigned>(accountId));
     snprintf(popupText, sizeof(popupText), "%s", tr(STR_ANKI_QUEUE_FAILED));
     popup = Popup::Failed;
   }
@@ -163,180 +251,53 @@ void AnkiAddNoteActivity::addNote() {
   requestUpdate();
 }
 
-void AnkiAddNoteActivity::loop() {
-  if (popup != Popup::None) {
-    if (millis() - popupTime >= POPUP_DURATION_MS) {
-      if (popup == Popup::Queued) {
-        finish();
-        return;
-      }
-      popup = Popup::None;
-      requestUpdate();
-    }
-    return;
-  }
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    finish();
-    return;
-  }
-  if (accountIndices.empty()) return;
-
-  if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    addNote();
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Up)) {
-    cycleAccount(-1);
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Down)) {
-    cycleAccount(1);
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Left)) {
-    cycleDeck(-1);
-  } else if (mappedInput.wasPressed(MappedInputManager::Button::Right)) {
-    cycleDeck(1);
-  }
-}
-
-// Word (bold), sentence, translation (italic) in the reader font between
-// `top` and `bottom`. Called twice per render inside a prewarm scope, so it
-// must draw the same text both times.
-void AnkiAddNoteActivity::drawBody(const int contentX, const int contentWidth, const int top, const int bottom) const {
-  const int fontId = SETTINGS.getReaderFontId();
-  const int lineHeight = renderer.getLineHeight(fontId);
-  if (lineHeight <= 0) return;
-
-  int y = top;
-  renderer.drawText(fontId, contentX, y, noteWord.c_str(), true, EpdFontFamily::BOLD);
-  y += lineHeight + BODY_GAP;
-
-  // Sentence gets up to two thirds of the remaining lines, the translation the rest (at least one).
-  const int remaining = std::max(2, (bottom - y - BODY_GAP) / lineHeight);
-  const int sentenceMax = std::max(1, remaining * 2 / 3);
-  const auto sentenceLines = renderer.wrappedText(fontId, sentence.c_str(), contentWidth, sentenceMax);
-  for (const auto& line : sentenceLines) {
-    renderer.drawText(fontId, contentX, y, line.c_str());
-    y += lineHeight;
-  }
-  y += BODY_GAP;
-
-  const int translationMax = std::max(1, remaining - static_cast<int>(sentenceLines.size()));
-  const char* translationText = translation.empty() ? tr(STR_ANKI_NO_TRANSLATION) : translation.c_str();
-  const auto translationLines =
-      renderer.wrappedText(fontId, translationText, contentWidth, translationMax, EpdFontFamily::ITALIC);
-  for (const auto& line : translationLines) {
-    renderer.drawText(fontId, contentX, y, line.c_str(), true, EpdFontFamily::ITALIC);
-    y += lineHeight;
-  }
-}
-
-bool AnkiAddNoteActivity::sideHintsShown() const {
-  const auto orientation = renderer.getOrientation();
-  const bool portrait =
-      orientation == GfxRenderer::Orientation::Portrait || orientation == GfxRenderer::Orientation::PortraitInverted;
-  // Side hint boxes sit at fixed portrait y positions; in landscape they would
-  // land on the body, so Up/Down go unhinted there.
-  return portrait && !mappedInput.hasTouch() && accountIndices.size() > 1;
-}
-
-void AnkiAddNoteActivity::drawHints() const {
-  if (accountIndices.empty()) {
-    const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
-    GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-    return;
-  }
-  const bool manyDecks = deckNames.size() > 1;
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_ANKI_ADD), manyDecks ? "<" : "", manyDecks ? ">" : "");
-  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  if (sideHintsShown()) {
-    GUI.drawSideButtonHints(renderer, tr(STR_ANKI_ACCOUNT), tr(STR_ANKI_ACCOUNT));
-  }
-}
-
-void AnkiAddNoteActivity::render(RenderLock&&) {
-  renderer.clearScreen();
-
+void AnkiAddNoteActivity::buildScreen(UiScreen& screen) {
   const auto& metrics = UITheme::getInstance().getMetrics();
-  const int pageWidth = renderer.getScreenWidth();
-  const int pageHeight = renderer.getScreenHeight();
+  // Content below the GUI.drawHeader band, above the button hints; derived
+  // from the safe area so board bezel insets apply (same as AnkiDeckSelect).
+  const Rect safe = UITheme::getInstance().getScreenSafeArea(renderer, true, false);
+  screen.setContentMarginFromScreen(
+      fui::Insets{static_cast<int16_t>(safe.y + metrics.topPadding + metrics.headerHeight),
+                  static_cast<int16_t>(renderer.getScreenWidth() - (safe.x + safe.width)),
+                  static_cast<int16_t>(renderer.getScreenHeight() - (safe.y + safe.height) + metrics.buttonHintsHeight),
+                  static_cast<int16_t>(safe.x)});
+  screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
-  // The hint bar is drawn at the physical bottom: a side gutter in landscape,
-  // the top band when inverted (same scheme as DictionaryDefinitionActivity).
-  const auto orientation = renderer.getOrientation();
-  const bool isLandscapeCw = orientation == GfxRenderer::Orientation::LandscapeClockwise;
-  const bool isLandscapeCcw = orientation == GfxRenderer::Orientation::LandscapeCounterClockwise;
-  const bool isInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
-  const int hintGutterWidth = (isLandscapeCw || isLandscapeCcw) ? metrics.sideButtonHintsWidth : 0;
-  const int areaX = isLandscapeCw ? hintGutterWidth : 0;
-  const int areaWidth = pageWidth - hintGutterWidth;
-  const int areaY = isInverted ? metrics.buttonHintsHeight : 0;
-  const int areaBottom = pageHeight - (isInverted ? 0 : metrics.buttonHintsHeight);
-
-  GUI.drawHeader(renderer, Rect{areaX, areaY + metrics.topPadding, areaWidth, metrics.headerHeight},
-                 tr(STR_ANKI_ADD_TO_ANKI));
-
-  // Keep the text clear of the side-button hint boxes when they are drawn.
-  const int sidePad = sideHintsShown() ? std::max(metrics.contentSidePadding, metrics.sideButtonHintsWidth + 10)
-                                       : metrics.contentSidePadding;
-  const int contentX = areaX + sidePad;
-  const int contentWidth = areaWidth - 2 * sidePad;
-  const int top = areaY + metrics.topPadding + metrics.headerHeight + metrics.verticalSpacing;
-  const int bottom = areaBottom - metrics.verticalSpacing;
-  const int uiLineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-
-  if (accountIndices.empty()) {
-    const auto lines = renderer.wrappedText(UI_10_FONT_ID, tr(STR_ANKI_NO_ENABLED_ACCOUNTS), contentWidth, 3);
-    int y = (top + bottom - static_cast<int>(lines.size()) * uiLineHeight) / 2;
-    for (const auto& line : lines) {
-      const int x = contentX + (contentWidth - renderer.getTextWidth(UI_10_FONT_ID, line.c_str())) / 2;
-      renderer.drawText(UI_10_FONT_ID, x, y, line.c_str());
-      y += uiLineHeight;
-    }
-    drawHints();
-    renderer.displayBuffer();
+  const auto& theme = screen.theme();
+  if (targets.empty()) {
+    screen.centeredText(tr(STR_ANKI_NO_ENABLED_ACCOUNTS), theme.bodyText);
     return;
   }
 
-  // Selector rows sit above the hint bar: account, deck, deck subtitle.
-  const int smallLineHeight = renderer.getLineHeight(SMALL_FONT_ID);
-  const int rowGap = 4;
-  const int selectorHeight = 2 * uiLineHeight + smallLineHeight + 2 * rowGap;
-  const int selectorTop = bottom - selectorHeight;
-  renderer.drawLine(contentX, selectorTop - metrics.verticalSpacing, contentX + contentWidth - 1,
-                    selectorTop - metrics.verticalSpacing);
+  // Note band: word (bold, one line), sentence (two lines), translation (two
+  // small lines); longer text truncates. Inset to the list's text edge.
+  fui::TextStyle wordStyle = theme.bodyText;
+  wordStyle.bold = true;
+  wordStyle.maxLines = 1;
+  fui::TextStyle sentenceStyle = theme.bodyText;
+  sentenceStyle.maxLines = 2;
+  fui::TextStyle translationStyle = theme.smallText;
+  translationStyle.maxLines = 2;
+  const int16_t bodyLine = screen.target().lineHeight(sentenceStyle.font);
+  const int16_t smallLine = screen.target().lineHeight(translationStyle.font);
+  const fui::Insets sideInset{0, theme.listSidePadding, 0, theme.listSidePadding};
+  screen.target().text(screen.takeTop(bodyLine, theme.spaceXs).inset(sideInset), noteWord.c_str(), wordStyle);
+  screen.target().text(screen.takeTop(static_cast<int16_t>(bodyLine * 2), theme.spaceXs).inset(sideInset),
+                       sentence.c_str(), sentenceStyle);
+  screen.target().text(screen.takeTop(static_cast<int16_t>(smallLine * 2), theme.spaceMd).inset(sideInset),
+                       translation.empty() ? tr(STR_ANKI_NO_TRANSLATION) : translation.c_str(), translationStyle);
 
-  const AnkiAccount* account = currentAccount();
-  std::string row;
-  row.reserve(64);
-  row.assign(tr(STR_ANKI_ACCOUNT)).append(": ").append(account ? account->name : "");
-  int y = selectorTop;
-  renderer.drawText(UI_10_FONT_ID, contentX, y,
-                    renderer.truncatedText(UI_10_FONT_ID, row.c_str(), contentWidth).c_str());
-  y += uiLineHeight + rowGap;
+  fui::ListProps props;
+  props.items = rowItems.data();
+  props.count = static_cast<uint16_t>(rowItems.size());
+  props.action = ACTION_ROW;
+  props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
+  syncListViewport(screen, props);
+  screen.list(props);
+}
 
-  row.assign(tr(STR_ANKI_DECK)).append(": ").append(deckNames[static_cast<size_t>(deckPos)]);
-  renderer.drawText(UI_10_FONT_ID, contentX, y,
-                    renderer.truncatedText(UI_10_FONT_ID, row.c_str(), contentWidth, EpdFontFamily::BOLD).c_str(), true,
-                    EpdFontFamily::BOLD);
-  y += uiLineHeight + rowGap;
-
-  if (!decksFromSync) {
-    renderer.drawText(SMALL_FONT_ID, contentX, y,
-                      renderer.truncatedText(SMALL_FONT_ID, tr(STR_ANKI_NO_DECKS_YET), contentWidth).c_str());
-  }
-
-  // Two-pass draw inside a prewarm scope so SD-card font glyphs load in one
-  // batch (same pattern as the reader and DictionaryDefinitionActivity).
-  const int bodyBottom = selectorTop - 2 * metrics.verticalSpacing;
-  auto* fcm = renderer.getFontCacheManager();
-  auto scope = fcm->createPrewarmScope();
-  drawBody(contentX, contentWidth, top, bodyBottom);  // scan pass: records codepoints only
-  scope.endScanAndPrewarm();
-  drawBody(contentX, contentWidth, top, bodyBottom);
-
-  drawHints();
-
-  if (popup != Popup::None) {
-    // drawPopup overlays the framebuffer and refreshes the display itself.
-    GUI.drawPopup(renderer, popupText);
-    return;
-  }
-  renderer.displayBuffer();
+void AnkiAddNoteActivity::render(RenderLock&& lock) {
+  UiListActivity::render(std::move(lock));
+  // drawPopup overlays the framebuffer and refreshes the display itself.
+  if (popup != Popup::None) GUI.drawPopup(renderer, popupText);
 }

@@ -244,3 +244,9 @@ whole afterwards.
 - **Sleep-entry sync** works unchanged: `exchange(wantCards=false)` is one
   `answerCards` request (plus `loadProfile` when a profile is set) and
   `pushNotes` is one request per note, all under the same 4 s HTTP timeout.
+- **Add-word modal is a checklist (2026-09-28).** One toggle row per enabled
+  account (subtitle: the deck this add goes to, Left/Right changes it for
+  this add only) and an "Add" row; the note is queued once per checked
+  account with its own client id. The checked set is remembered between adds
+  (first time: the last reviewed account). Tap works everywhere, so touch-only
+  boards no longer depend on a physical Confirm.
