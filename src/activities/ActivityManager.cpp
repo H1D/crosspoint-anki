@@ -12,6 +12,7 @@
 
 #include "CrossPointSettings.h"
 #include "OpdsServerStore.h"
+#include "anki/review/AnkiReviewActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -287,6 +288,15 @@ void ActivityManager::goToBrowser() {
   }
 }
 
+void ActivityManager::goToAnki() {
+  auto activity = makeUniqueNoThrow<AnkiReviewActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("ACT", "OOM: Anki review activity");
+    return;
+  }
+  replaceActivity(std::move(activity));
+}
+
 void ActivityManager::goToReader(std::string path, const bool allowFastInitialRefresh) {
   if (path.empty()) {
     goToFileBrowser("/");
@@ -333,6 +343,8 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
+    } else if (activityName == "AnkiReview" || activityName == "AnkiSync") {
+      initialMenuItem = HomeMenuItem::ANKI;
     }
   }
   replaceActivity(std::make_unique<HomeActivity>(renderer, mappedInput, initialMenuItem, cleanInitialRefresh));

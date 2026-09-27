@@ -225,9 +225,9 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   fontFamily = clamp(storedFontFamily, BUILTIN_FONT_COUNT, 0);
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
-    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync, HomeButtonAction::Ignore,
-                                                  HomeButtonAction::Bookmark, HomeButtonAction::Dictionary,
-                                                  HomeButtonAction::ReaderMenu};
+    static constexpr HomeButtonAction LEGACY[] = {HomeButtonAction::Sync,       HomeButtonAction::Ignore,
+                                                  HomeButtonAction::Bookmark,   HomeButtonAction::Dictionary,
+                                                  HomeButtonAction::ReaderMenu, HomeButtonAction::AnkiAdd};
     if (s.longPressMenuFunction < sizeof(LEGACY) / sizeof(LEGACY[0])) {
       s.homeButtonLongPressAction = static_cast<uint8_t>(LEGACY[s.longPressMenuFunction]);
       needsResave = true;

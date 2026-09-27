@@ -19,6 +19,7 @@ enum class SettingAction {
   ClockSettings,
   KOReaderSync,
   OPDSBrowser,
+  AnkiAccounts,
   Network,
   ClearCache,
   CheckForUpdates,

@@ -7,6 +7,7 @@
 #include "CrossPointSettings.h"
 #include "MappedInputManager.h"
 #include "ReaderUtils.h"
+#include "anki/AnkiAccountStore.h"
 #include "components/UITheme.h"
 
 namespace fui = freeink::ui;
@@ -53,6 +54,9 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, bool h
     items.push_back({MenuAction::FRONTLIGHT, StrId::STR_FRONTLIGHT});
   }
   items.push_back({MenuAction::DICTIONARY, StrId::STR_LOOKUP});
+  if (ANKI_STORE.hasEnabledAccounts()) {
+    items.push_back({MenuAction::ANKI_ADD, StrId::STR_ANKI_ADD_TO_ANKI});
+  }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
   items.push_back({MenuAction::GO_TO_PERCENT, StrId::STR_GO_TO_PERCENT});

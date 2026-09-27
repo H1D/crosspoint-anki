@@ -180,11 +180,14 @@ inline SettingInfo buildDictionarySetting(const std::vector<DictionaryEntry>& di
   return s;
 }
 
+// The setting stores the list index, so the list is never truncated per board
+// ("Reader menu" shows everywhere): dropping an entry would shift the values
+// that follow it.
 inline std::vector<StrId> buildLongPressMenuValues() {
-  static constexpr StrId VALUES[] = {StrId::STR_KOSYNC, StrId::STR_DISABLED, StrId::STR_BOOKMARK_OPTION,
-                                     StrId::STR_DICTIONARY, StrId::STR_READER_MENU};
-  const size_t count = BoardConfig::hasHomeKey() ? std::size(VALUES) : std::size(VALUES) - 1;
-  return {VALUES, VALUES + count};
+  static constexpr StrId VALUES[] = {StrId::STR_KOSYNC,     StrId::STR_DISABLED,    StrId::STR_BOOKMARK_OPTION,
+                                     StrId::STR_DICTIONARY, StrId::STR_READER_MENU, StrId::STR_ANKI_ADD_TO_ANKI};
+  static_assert(std::size(VALUES) == CrossPointSettings::LONG_PRESS_MENU_FUNCTION_COUNT, "long-press options");
+  return {VALUES, VALUES + std::size(VALUES)};
 }
 
 inline std::vector<StrId> homeThemeValues() {

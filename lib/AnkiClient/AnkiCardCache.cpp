@@ -36,18 +36,58 @@ bool AnkiCardCache::parseLine(const std::string& line, AnkiCard& out) {
       nextIndex++;
       return;
     }
-    if (key == "deck") out.deck = v;
-    else if (key == "kind") out.kind = v;
-    else if (key == "q") out.q = v;
-    else if (key == "a") out.a = v;
+    if (key == "deck")
+      out.deck = v;
+    else if (key == "kind")
+      out.kind = v;
+    else if (key == "q")
+      out.q = v;
+    else if (key == "a")
+      out.a = v;
   };
   cb.onNumber = [&](const std::string& v) {
-    if (key == "card_id") out.cardId = ankijson::toInt64(v);
-    else if (key == "media") out.mediaCount = static_cast<uint8_t>(ankijson::toInt64(v));
+    if (key == "card_id")
+      out.cardId = ankijson::toInt64(v);
+    else if (key == "media")
+      out.mediaCount = static_cast<uint8_t>(ankijson::toInt64(v));
   };
   ankijson::Reader reader(std::move(cb));
   reader.feed(line);
   return !reader.hasError() && out.cardId != 0;
+}
+
+int64_t AnkiCardCache::lineCardId(const std::string& line) {
+  static constexpr char KEY[] = "\"card_id\":";
+  const size_t at = line.find(KEY);
+  if (at == std::string::npos) return 0;
+  size_t i = at + sizeof(KEY) - 1;
+  while (i < line.size() && line[i] == ' ') i++;
+  const bool negative = i < line.size() && line[i] == '-';
+  if (negative) i++;
+  int64_t value = 0;
+  bool digits = false;
+  for (; i < line.size() && line[i] >= '0' && line[i] <= '9'; i++) {
+    value = value * 10 + (line[i] - '0');
+    digits = true;
+  }
+  if (!digits) return 0;
+  return negative ? -value : value;
+}
+
+std::vector<int64_t> AnkiCardCache::cardIds() {
+  std::vector<int64_t> ids;
+  auto f = fs.open(cardsPath, AnkiFs::Mode::Read);
+  if (!f) return ids;
+  ids.reserve(count());
+  AnkiLineReader lines(*f);
+  std::string line;
+  // toLine() writes card_id first; a generous cap still covers hand-edited lines.
+  while (lines.next(line, 512)) {
+    if (line.empty()) continue;  // same skip rule as load()
+    ids.push_back(lineCardId(line));
+  }
+  f->close();
+  return ids;
 }
 
 size_t AnkiCardCache::count() {
@@ -89,11 +129,16 @@ bool AnkiCardCache::readMeta(Meta& out) {
   cb.onKey = [&](const std::string& k) { key = k; };
   cb.onNumber = [&](const std::string& v) {
     const int64_t n = ankijson::toInt64(v);
-    if (key == "new") out.counts.newCount = static_cast<uint16_t>(n);
-    else if (key == "learning") out.counts.learning = static_cast<uint16_t>(n);
-    else if (key == "due") out.counts.due = static_cast<uint16_t>(n);
-    else if (key == "returned") out.counts.returned = static_cast<uint16_t>(n);
-    else if (key == "fetched_at") out.fetchedAt = n;
+    if (key == "new")
+      out.counts.newCount = static_cast<uint16_t>(n);
+    else if (key == "learning")
+      out.counts.learning = static_cast<uint16_t>(n);
+    else if (key == "due")
+      out.counts.due = static_cast<uint16_t>(n);
+    else if (key == "returned")
+      out.counts.returned = static_cast<uint16_t>(n);
+    else if (key == "fetched_at")
+      out.fetchedAt = n;
   };
   cb.onString = [&](const std::string& v) {
     if (key == "sync_error") out.syncError = v;

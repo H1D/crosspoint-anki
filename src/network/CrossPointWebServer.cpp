@@ -1,5 +1,6 @@
 #include "CrossPointWebServer.h"
 
+#include <AnkiSyncEngine.h>
 #include <ArduinoJson.h>
 #include <BoardConfig.h>
 #include <FsHelpers.h>
@@ -13,6 +14,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 
 #include "CrossPointSettings.h"
 #include "FontInstaller.h"
@@ -21,6 +23,9 @@
 #include "SettingsList.h"
 #include "WebDAVHandler.h"
 #include "WifiCredentialStore.h"
+#include "anki/AnkiAccountStore.h"
+#include "anki/AnkiSecureHttp.h"
+#include "anki/AnkiStorageFs.h"
 #include "html/FilesPageHtml.generated.h"
 #include "html/FontsPageHtml.generated.h"
 #include "html/HomePageHtml.generated.h"
@@ -187,6 +192,11 @@ void CrossPointWebServer::begin() {
   server->on("/api/opds", HTTP_GET, [this] { handleGetOpdsServers(); });
   server->on("/api/opds", HTTP_POST, [this] { handlePostOpdsServer(); });
   server->on("/api/opds/delete", HTTP_POST, [this] { handleDeleteOpdsServer(); });
+
+  // Anki account endpoints
+  server->on("/api/anki", HTTP_GET, [this] { handleGetAnkiAccounts(); });
+  server->on("/api/anki", HTTP_POST, [this] { handlePostAnkiAccount(); });
+  server->on("/api/anki/delete", HTTP_POST, [this] { handleDeleteAnkiAccount(); });
 
   // Wi-Fi credential endpoints
   server->on("/api/wifi", HTTP_GET, [this] { handleGetWifiNetworks(); });
@@ -1453,6 +1463,177 @@ void CrossPointWebServer::handleDeleteOpdsServer() {
 
   OPDS_STORE.removeServer(static_cast<size_t>(idx));
   LOG_DBG("WEB", "Deleted OPDS server at index %d", idx);
+  server->send(200, "text/plain", "OK");
+}
+
+// ---- Anki Account API ----
+
+void CrossPointWebServer::handleGetAnkiAccounts() const {
+  // Reload so edits made on the device screens show up without a restart
+  ANKI_STORE.loadFromFile();
+  const auto& accounts = ANKI_STORE.getAccounts();
+  const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
+  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), nullptr);
+
+  // Stream JSON array incrementally to avoid allocating the full response in memory
+  server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server->send(200, "application/json", "");
+  server->sendContent("[");
+
+  // One account per document; the deck lists make it too long for a fixed
+  // stack buffer, so it is serialised into a heap string and freed per loop.
+  std::string output;
+  JsonDocument doc;
+
+  for (size_t i = 0; i < accounts.size(); i++) {
+    const AnkiAccount& a = accounts[i];
+    doc.clear();
+    doc["index"] = i;
+    doc["id"] = a.id;
+    doc["name"] = a.name;
+    doc["url"] = a.url;
+    doc["profile"] = a.profile;
+    // Never expose tokens over the API — only indicate whether one is set
+    doc["hasToken"] = !a.token.empty();
+    doc["enabled"] = a.enabled;
+    doc["model"] = a.model;
+    JsonArray decks = doc["decks"].to<JsonArray>();
+    for (const std::string& d : a.decks) decks.add(d);
+    doc["cacheSize"] = a.cacheSize;
+    doc["maxNewPerDay"] = a.maxNewPerDay;
+    doc["isReview"] = static_cast<int>(i) == reviewIdx;
+    // Deck names cached by the last sync, for the web deck picker
+    JsonArray available = doc["availableDecks"].to<JsonArray>();
+    for (const AnkiDeck& d : engine.loadDecks(a.id)) available.add(d.name);
+
+    output.clear();
+    serializeJson(doc, output);
+
+    if (i > 0) server->sendContent(",");
+    server->sendContent(output.c_str(), output.size());  // no String copy
+    yield();                          // Yield to allow WiFi and other tasks to process during a slow send
+    resetTaskWatchdogIfSubscribed();  // Reset watchdog: each sendContent() is a blocking network write
+  }
+
+  server->sendContent("]");
+  server->sendContent("");
+  LOG_DBG("WEB", "Served Anki accounts API (%zu accounts)", accounts.size());
+}
+
+void CrossPointWebServer::handlePostAnkiAccount() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+
+  const String body = server->arg("plain");
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
+    return;
+  }
+
+  const bool isUpdate = doc["index"].is<int>();
+  int idx = isUpdate ? doc["index"].as<int>() : -1;
+  if (isUpdate && (idx < 0 || idx >= static_cast<int>(ANKI_STORE.getCount()))) {
+    server->send(400, "text/plain", "Invalid account index");
+    return;
+  }
+
+  // Updates start from the stored entry so omitted fields (token, lastDeck)
+  // keep their values; new accounts start from the struct defaults.
+  AnkiAccount account;
+  if (isUpdate) account = *ANKI_STORE.getAccount(static_cast<size_t>(idx));
+
+  // Same limits as the device keyboard; the store truncates a longer token
+  // to "" on reload (MAX_TOKEN_LENGTH), so oversize input is rejected here.
+  constexpr size_t MAX_TEXT = 63, MAX_URL = 127, MAX_TOKEN = 200, MAX_DECK = 100;
+  auto readString = [&doc](const char* key, std::string& out, size_t maxLen) -> bool {
+    if (!doc[key].is<const char*>()) return true;  // absent: keep the current value
+    const char* value = doc[key].as<const char*>();
+    if (strlen(value) > maxLen) return false;
+    out = value;
+    return true;
+  };
+  if (!readString("name", account.name, MAX_TEXT) || !readString("url", account.url, MAX_URL) ||
+      !readString("profile", account.profile, MAX_TEXT) || !readString("model", account.model, MAX_TEXT)) {
+    server->send(400, "text/plain", "Field too long");
+    return;
+  }
+  // Token is optional: the web UI omits it when the user left the field empty
+  if (!readString("token", account.token, MAX_TOKEN)) {
+    server->send(400, "text/plain", "Token too long");
+    return;
+  }
+  if (doc["enabled"].is<bool>()) account.enabled = doc["enabled"].as<bool>();
+  if (doc["decks"].is<JsonArrayConst>()) {
+    account.decks.clear();
+    for (JsonVariantConst v : doc["decks"].as<JsonArrayConst>()) {
+      const char* name = v.as<const char*>();
+      if (!name || !*name) continue;
+      if (strlen(name) > MAX_DECK) {
+        server->send(400, "text/plain", "Deck name too long");
+        return;
+      }
+      account.decks.emplace_back(name);
+    }
+  }
+  if (doc["cacheSize"].is<int>()) {
+    account.cacheSize = static_cast<uint8_t>(std::clamp(doc["cacheSize"].as<int>(), 1, 200));
+  }
+  if (doc["maxNewPerDay"].is<int>()) {
+    account.maxNewPerDay = static_cast<uint8_t>(std::clamp(doc["maxNewPerDay"].as<int>(), 0, 255));
+  }
+  const bool makeReview = doc["isReview"].is<bool>() && doc["isReview"].as<bool>();
+
+  if (isUpdate) {
+    if (!ANKI_STORE.updateAccount(static_cast<size_t>(idx), account)) {
+      server->send(500, "text/plain", "Cannot save account");
+      return;
+    }
+    LOG_DBG("WEB", "Updated Anki account at index %d", idx);
+  } else {
+    if (!ANKI_STORE.addAccount(account)) {
+      server->send(400, "text/plain", "Cannot add account (limit reached)");
+      return;
+    }
+    idx = static_cast<int>(ANKI_STORE.getCount()) - 1;
+    LOG_DBG("WEB", "Added new Anki account: %s", account.name.c_str());
+  }
+  if (makeReview) ANKI_STORE.setReviewAccount(static_cast<size_t>(idx));
+
+  server->send(200, "text/plain", "OK");
+}
+
+// Uses POST (not HTTP DELETE) because ESP32 WebServer doesn't support DELETE with body.
+void CrossPointWebServer::handleDeleteAnkiAccount() {
+  if (!server->hasArg("plain")) {
+    server->send(400, "text/plain", "Missing JSON body");
+    return;
+  }
+
+  const String body = server->arg("plain");
+  JsonDocument doc;
+  const DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    server->send(400, "text/plain", String("Invalid JSON: ") + err.c_str());
+    return;
+  }
+
+  if (!doc["index"].is<int>()) {
+    server->send(400, "text/plain", "Missing index");
+    return;
+  }
+
+  const int idx = doc["index"].as<int>();
+  if (idx < 0 || idx >= static_cast<int>(ANKI_STORE.getCount())) {
+    server->send(400, "text/plain", "Invalid account index");
+    return;
+  }
+
+  ANKI_STORE.removeAccount(static_cast<size_t>(idx));
+  LOG_DBG("WEB", "Deleted Anki account at index %d", idx);
   server->send(200, "text/plain", "OK");
 }
 

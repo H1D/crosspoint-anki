@@ -12,6 +12,7 @@
 // clang-format on
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 
@@ -19,7 +20,17 @@
 #include "FirmwareFlasher.h"
 
 namespace {
-constexpr char latestReleaseUrl[] = "https://api.github.com/repos/crosspoint-reader/crosspoint-reader/releases/latest";
+// crosspoint-anki fork: updates come from the fork's releases, tagged
+// <upstream version>-anki.<n> (see docs/anki/DECISIONS.md).
+constexpr char latestReleaseUrl[] = "https://api.github.com/repos/H1D/crosspoint-anki/releases/latest";
+
+// Returns the <n> of a "-anki.<n>" suffix, or 0 when the version has none
+// (a plain upstream build).
+int ankiCounter(const char* version) {
+  const char* p = strstr(version, "-anki.");
+  if (!p) return 0;
+  return atoi(p + 6);
+}
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
@@ -117,6 +128,14 @@ bool OtaUpdater::isUpdateNewer() const {
    * Check patch versions.
    */
   if (latestPatch != currentPatch) return latestPatch > currentPatch;
+
+  // Same upstream base version: the fork counter decides. A plain upstream
+  // build counts as 0, so 1.6.5 -> 1.6.5-anki.1 is an update. The suffix is
+  // found with strstr so per-board CROSSPOINT_VERSION suffixes (-x4pro, ...)
+  // don't get in the way.
+  const int latestAnki = ankiCounter(latestVersion.c_str());
+  const int currentAnki = ankiCounter(currentVersion);
+  if (latestAnki != currentAnki) return latestAnki > currentAnki;
 
   // If we reach here, it means all segments are equal.
   // One final check, if we're on an RC build (contains "-rc"), we should consider the latest version as newer even if

@@ -302,6 +302,7 @@
 
   <div id="wifi-container"></div>
   <div id="opds-container"></div>
+  <div id="anki-container"></div>
 
   <div class="card">
     <p style="text-align: center; color: #95a5a6; margin: 0;">
@@ -823,6 +824,171 @@
     }
   }
 
+  // --- Anki Account Management ---
+  // Editable list of AnkiDo accounts via the /api/anki endpoints. Tokens are
+  // never sent back by the device; the "(unchanged)" placeholder means the
+  // stored token is kept unless a new one is typed. Deck names come from the
+  // device's per-account cache (filled by the first sync).
+  let ankiAccounts = [];
+
+  function renderAnkiAccount(acc, idx) {
+    const isNew = idx === -1;
+    const id = isNew ? 'new' : idx;
+    const decks = acc.decks || [];
+    const available = (acc.availableDecks || []).slice();
+    decks.forEach(function(d) { if (available.indexOf(d) === -1) available.push(d); });
+    let deckOptions = '';
+    available.forEach(function(d) {
+      const sel = decks.indexOf(d) !== -1 ? ' selected' : '';
+      deckOptions += '<option value="' + escapeHtml(d) + '"' + sel + '>' + escapeHtml(d) + '</option>';
+    });
+    const deckControl = available.length === 0
+      ? '<input type="text" id="anki-deckadd-' + id + '" placeholder="All decks (or names, comma-separated)">'
+      : '<select multiple id="anki-decks-' + id + '" size="' + Math.min(available.length, 6) + '">' + deckOptions + '</select>' +
+        '<div style="color:var(--label-color);font-size:0.85em;">None selected = all decks</div>';
+    return '<div class="opds-server" id="anki-' + id + '">' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Name</span>' +
+        '<span class="setting-control"><input type="text" id="anki-name-' + id + '" value="' + escapeHtml(acc.name || '') + '"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">AnkiDo URL</span>' +
+        '<span class="setting-control"><input type="text" id="anki-url-' + id + '" value="' + escapeHtml(acc.url || '') + '" placeholder="https://"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Profile</span>' +
+        '<span class="setting-control"><input type="text" id="anki-profile-' + id + '" value="' + escapeHtml(acc.profile || '') + '"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Token</span>' +
+        '<span class="setting-control"><input type="password" id="anki-token-' + id + '" placeholder="' + (acc.hasToken ? '(unchanged)' : '') + '"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Enabled</span>' +
+        '<span class="setting-control"><input type="checkbox" id="anki-enabled-' + id + '"' + (acc.enabled !== false ? ' checked' : '') + '></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Review this account</span>' +
+        '<span class="setting-control"><input type="radio" name="anki-review" id="anki-review-' + id + '"' + (acc.isReview ? ' checked' : '') + '></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Decks</span>' +
+        '<span class="setting-control">' + deckControl + '</span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Note type</span>' +
+        '<span class="setting-control"><input type="text" id="anki-model-' + id + '" value="' + escapeHtml(acc.model || 'Basic') + '"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">Cards per sync</span>' +
+        '<span class="setting-control"><input type="number" min="1" max="200" id="anki-cache-' + id + '" value="' + (acc.cacheSize || 60) + '"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name">New cards per day (0 = no cap)</span>' +
+        '<span class="setting-control"><input type="number" min="0" max="255" id="anki-maxnew-' + id + '" value="' + (acc.maxNewPerDay === undefined ? 10 : acc.maxNewPerDay) + '"></span>' +
+      '</div>' +
+      '<div class="opds-actions">' +
+        '<button class="btn-small btn-save-server" onclick="saveAnkiAccount(' + idx + ')">Save</button>' +
+        (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteAnkiAccount(' + idx + ')">Delete</button>') +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderAnkiSection() {
+    const container = document.getElementById('anki-container');
+    let html = '<div class="card"><h2>Anki Accounts</h2>';
+
+    if (ankiAccounts.length === 0) {
+      html += '<p style="color:var(--label-color);text-align:center;">No Anki accounts configured</p>';
+    } else {
+      ankiAccounts.forEach(function(acc, idx) {
+        html += renderAnkiAccount(acc, idx);
+      });
+    }
+
+    html += '<div style="margin-top:12px;text-align:center;">' +
+      '<button class="btn-small btn-add" onclick="addAnkiAccount()">+ Add Account</button>' +
+    '</div></div>';
+    container.innerHTML = html;
+  }
+
+  async function loadAnkiAccounts() {
+    try {
+      const resp = await fetch('/api/anki');
+      if (!resp.ok) throw new Error('Failed to load');
+      ankiAccounts = await resp.json();
+      renderAnkiSection();
+    } catch (e) {
+      console.error('Anki load error:', e);
+    }
+  }
+
+  function addAnkiAccount() {
+    const container = document.getElementById('anki-container');
+    const card = container.querySelector('.card');
+    const addBtn = card.querySelector('.btn-add').parentElement;
+    // Prevent multiple unsaved new-account forms at once (idx -1 -> id "new")
+    if (document.getElementById('anki-new')) return;
+    addBtn.insertAdjacentHTML('beforebegin',
+      renderAnkiAccount({name:'',url:'',profile:'',hasToken:false,enabled:true,isReview:ankiAccounts.length === 0,decks:[],availableDecks:[],model:'Basic',cacheSize:60,maxNewPerDay:10}, -1));
+  }
+
+  async function saveAnkiAccount(idx) {
+    const id = idx === -1 ? 'new' : idx;
+    let decks = [];
+    const select = document.getElementById('anki-decks-' + id);
+    if (select) {
+      Array.from(select.selectedOptions).forEach(function(o) { decks.push(o.value); });
+    } else {
+      const typed = document.getElementById('anki-deckadd-' + id).value;
+      decks = typed.split(',').map(function(d) { return d.trim(); }).filter(function(d) { return d; });
+    }
+    const data = {
+      name: document.getElementById('anki-name-' + id).value,
+      url: document.getElementById('anki-url-' + id).value,
+      profile: document.getElementById('anki-profile-' + id).value,
+      enabled: document.getElementById('anki-enabled-' + id).checked,
+      isReview: document.getElementById('anki-review-' + id).checked,
+      decks: decks,
+      model: document.getElementById('anki-model-' + id).value,
+      cacheSize: parseInt(document.getElementById('anki-cache-' + id).value, 10) || 60,
+      maxNewPerDay: parseInt(document.getElementById('anki-maxnew-' + id).value, 10) || 0,
+    };
+    // Only include the token when the user typed one; omitting it keeps the stored token.
+    const token = document.getElementById('anki-token-' + id).value;
+    if (token) data.token = token;
+    if (idx >= 0) data.index = idx;
+
+    try {
+      const resp = await fetch('/api/anki', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      showMessage('Anki account saved!', false);
+      await loadAnkiAccounts();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
+  async function deleteAnkiAccount(idx) {
+    if (!confirm('Delete this Anki account and its cached cards?')) return;
+    try {
+      const resp = await fetch('/api/anki/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({index: idx})
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      showMessage('Anki account deleted', false);
+      await loadAnkiAccounts();
+    } catch (e) {
+      showMessage('Error: ' + e.message, true);
+    }
+  }
+
   // Sequential, not concurrent: the device's web server handles one client
   // connection at a time, and three simultaneous fetches on page load can
   // stall long enough inside a single response to trip the firmware watchdog.
@@ -830,6 +996,7 @@
     await loadSettings();
     await loadWifiNetworks();
     await loadOpdsServers();
+    await loadAnkiAccounts();
   })();
 </script>
 </body>

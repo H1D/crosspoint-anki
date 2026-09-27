@@ -66,7 +66,7 @@ stay cheap.
   rejected) is dropped from the journal; the rest stay for the next session.
 - Card cache is one JSON object per line (`cards.jsonl`) written while the
   response streams, so the response body never sits in RAM (ESP32-C3 budget).
-  A card line is parsed on demand with ArduinoJson.
+  A card line is parsed on demand with the client's own streaming reader.
 - AnkiDo's `next` strings carry Unicode bidi isolates (U+2068/U+2069). They are
   stripped before drawing; the fonts have no glyphs for them.
 - No media in v1: `[img:...]` becomes `[image]`, audio markers are dropped. The
@@ -122,3 +122,47 @@ machine-drafted by the assistant and are unreviewed.
 
 Built in one pass, committed directly to `develop` on the fork, reviewed as a
 whole afterwards.
+
+## Implementation notes (2026-09-27)
+
+- **Note fields are `Front` and `Back`.** `POST /notes` needs exact field
+  names per note type; the fork assumes the account's note type has fields
+  named `Front` and `Back` (true for Anki's `Basic` family). Other note types
+  are accepted in settings but will fail with `unknown_field` in the sync
+  summary until per-account field mapping exists.
+- **Every echoed `client_id` is dropped from the journal**, including
+  `rejected`/`card_not_found`. AnkiDo allows a retry for `card_not_found`, but
+  a card deleted on another device is not worth keeping a stuck entry for.
+- **Own streaming JSON reader** (`lib/AnkiClient/AnkiJson.*`) instead of the
+  repo's `StreamingJsonParser`: that one caps tokens at 512 bytes and does
+  not decode `\uXXXX`; card text needs both. It uses `std::function`
+  callbacks (a few KB of flash) because host-testability outweighed the
+  CLAUDE.md preference for plain function pointers here; revisit if flash
+  gets tight.
+- **`answered_at` only when the RTC year is >= 2024**, otherwise the review is
+  sent without a timestamp and AnkiDo dates it at receipt. No `elapsed_s`:
+  uptime does not survive deep sleep.
+- **Sync order per session**: exchange (reviews + queue) → notes → decks. A
+  deck-list failure does not fail the session.
+- **Inline AnkiWeb sync timeout**: 15 s for manual/app syncs. The sleep-entry
+  sync only uploads (reviews exchange without `want`, then notes; no deck fetch,
+  no card download) with a 4 s HTTP timeout per request, a 3 s inline sync
+  timeout, and the 15 s budget checked before every request.
+- **Build environment**: PlatformIO core 6.2.0 requires `tool-scons
+  4.41101.0` but the pioarduino platform pinned 4.40801.0 and deleted the
+  package mid-build, which broke the ESP32-C3 link step. Fixed locally by
+  pointing `~/.platformio/platforms/espressif32/platform.json` at
+  `platformio/tool-scons ~4.41101.0` (lost on `pio pkg update`; CI installs
+  fresh and is unaffected).
+- **Simulator**: `[env:simulator]` in `platformio.ini` expects the
+  crosspoint-simulator checkout as a sibling directory (`../simulator`), with
+  the fork's `SecureHttpClient` streaming API added to the simulator's stub.
+  Headless runs: `SDL_VIDEODRIVER=dummy CROSSPOINT_SIM_INPUT_SCRIPT=...
+  CROSSPOINT_SIM_SCREENSHOTS=... .pio/build/simulator/program`; SD root is
+  `./fs_/`.
+- **Known, accepted (review 2026-09-27)**: the journal/queue rewrite after an
+  acknowledgement is temp-file + remove + rename, not atomic on FAT; a power
+  loss in that window loses only entries the server had not acknowledged, and
+  the next session re-sends nothing wrong. A sleep-entry sync started while
+  the File Transfer hotspot is up drops the AP before that screen's own exit
+  runs; sleep follows anyway.

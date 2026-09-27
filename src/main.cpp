@@ -1,3 +1,4 @@
+#include <AnkiSyncEngine.h>
 #include <Arduino.h>
 #include <BoardConfig.h>
 #include <Epub.h>
@@ -30,9 +31,14 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
+#include "WifiCredentialStore.h"
 #include "activities/Activity.h"
 #include "activities/ActivityManager.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#include "anki/AnkiAccountStore.h"
+#include "anki/AnkiDevice.h"
+#include "anki/AnkiSecureHttp.h"
+#include "anki/AnkiStorageFs.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "platform/UsbSerialJtagHandoff.h"
@@ -141,7 +147,8 @@ constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 2;
-constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_SETTINGS;
+constexpr uint32_t SILENT_REBOOT_TARGET_ANKI = 3;
+constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_ANKI;
 constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1U << 0;
 
 // How the device is coming back to life, resolved once at boot. Both resume
@@ -194,6 +201,8 @@ void silentRestart() { silentRestartTo(SILENT_REBOOT_TARGET_HOME, "home"); }
 void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "reader"); }
 
 void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
+
+void silentRestartToAnki() { silentRestartTo(SILENT_REBOOT_TARGET_ANKI, "anki"); }
 
 void restartToHomeAfterStorageHandoff() {
   if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
@@ -258,6 +267,78 @@ static bool loadSleepFrameBuffer() {
   return true;
 }
 
+// Pushes pending Anki reviews and notes before sleeping, when a saved network
+// is at hand and the battery can afford the radio. Upload only: no deck fetch,
+// no card download. Bounded: 10 s to join, 4 s per request, 15 s overall
+// checked before every request. Failures are silent; the queue stays for the
+// next session. The popup is skipped for Quick Resume, whose sleep frame is
+// the current framebuffer.
+static void syncAnkiBeforeSleep(const bool showPopup) {
+  if (!ANKI_STORE.hasEnabledAccounts()) return;
+  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
+  bool pending = false;
+  for (const AnkiAccount& account : ANKI_STORE.getAccounts()) {
+    if (account.enabled && engine.hasPending(account)) {
+      pending = true;
+      break;
+    }
+  }
+  if (!pending) return;
+  if (powerManager.getBatteryPercentage() < 20) {
+    LOG_DBG("ANKI", "Sleep sync skipped: battery low");
+    return;
+  }
+  WIFI_STORE.loadFromFile();
+  const auto credential = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (!credential) {
+    LOG_DBG("ANKI", "Sleep sync skipped: no saved network");
+    return;
+  }
+
+  constexpr unsigned long JOIN_TIMEOUT_MS = 10000;
+  constexpr unsigned long SYNC_BUDGET_MS = 15000;
+  constexpr uint32_t REQUEST_TIMEOUT_MS = 4000;
+  if (showPopup) GUI.drawPopup(renderer, tr(STR_ANKI_SYNCING));
+  WiFi.mode(WIFI_STA);
+  if (credential->password.empty()) {
+    WiFi.begin(credential->ssid.c_str());
+  } else {
+    WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
+  }
+  const unsigned long joinStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - joinStart < JOIN_TIMEOUT_MS) {
+    delay(100);
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setSleep(false);
+    AnkiSecureHttp& http = AnkiSecureHttp::instance();
+    const uint32_t savedTimeout = http.timeoutMs;
+    http.timeoutMs = REQUEST_TIMEOUT_MS;
+    // AnkiDo's inline AnkiWeb sync must finish inside one request timeout.
+    engine.syncTimeoutSeconds = 3;
+    const unsigned long syncStart = millis();
+    const auto overBudget = [syncStart] { return millis() - syncStart > SYNC_BUDGET_MS; };
+    for (const AnkiAccount& account : ANKI_STORE.getAccounts()) {
+      if (!account.enabled || !engine.hasPending(account)) continue;
+      if (overBudget()) break;
+      const AnkiSyncEngine::Result reviews = engine.exchange(account, /*wantCards=*/false);
+      LOG_DBG("ANKI", "Sleep sync %s reviews: ok=%d acked=%u", account.name.c_str(), reviews.ok ? 1 : 0,
+              static_cast<unsigned>(reviews.reviewsAcked));
+      if (!reviews.ok) continue;  // unreachable or rejected: leave this account alone
+      if (overBudget()) break;
+      const AnkiSyncEngine::Result notes = engine.pushNotes(account);
+      LOG_DBG("ANKI", "Sleep sync %s notes: ok=%d acked=%u", account.name.c_str(), notes.ok ? 1 : 0,
+              static_cast<unsigned>(notes.notesAcked));
+    }
+    if (overBudget()) LOG_DBG("ANKI", "Sleep sync budget exhausted");
+    http.timeoutMs = savedTimeout;
+  } else {
+    LOG_DBG("ANKI", "Sleep sync skipped: join timed out");
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
@@ -272,6 +353,8 @@ void enterDeepSleep(bool fromTimeout = false) {
   APP_STATE.showBootScreen = false;
 
   APP_STATE.saveToFile();
+
+  syncAnkiBeforeSleep(/*showPopup=*/!isQuickResumeSleep);
 
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
@@ -437,6 +520,7 @@ void setup() {
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));
   KOREADER_STORE.loadFromFile();
   OPDS_STORE.loadFromFile();
+  ANKI_STORE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
 
@@ -542,6 +626,8 @@ void setup() {
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_SETTINGS) {
     // Back out of the WiFi rows and the user is where they left off, not on Home.
     activityManager.goToSettings();
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_ANKI) {
+    activityManager.goToAnki();
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale

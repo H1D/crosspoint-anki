@@ -106,6 +106,11 @@ bool AnkiAccountStore::addAccount(AnkiAccount& account) {
   account.id = nextId++;
   account.url = trimSlash(account.url);
   if (account.model.empty()) account.model = "Basic";
+  // nextId lives only in anki.json: if that file was lost while the data
+  // directories survived, a new account must not inherit an old id's queued
+  // reviews and notes and push them to a different server.
+  const std::string dir = ankipaths::accountDir(account.id);
+  if (Storage.exists(dir.c_str())) Storage.removeDir(dir.c_str());
   accounts.push_back(account);
   if (reviewAccountId == 0) reviewAccountId = account.id;
   return saveToFile();

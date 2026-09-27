@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>crosspoint-anki flasher</title>
+  <meta name="description" content="Flash the crosspoint-anki firmware (CrossPoint Reader with Anki flashcards) onto Xteink X3/X4/X4 Pro/X4C, Seeed reTerminal Sticky and M5 PaperMono from the browser.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>crosspoint-anki flasher</h1>
+    <p>
+      <a href="https://github.com/H1D/crosspoint-anki">crosspoint-anki</a> is a fork of
+      <a href="https://github.com/crosspoint-reader/crosspoint-reader">CrossPoint Reader</a> that adds Anki
+      flashcard review and "add word from the dictionary" on the device. This page writes a release build
+      into the inactive OTA slot of your reader over USB, the same way the official CrossPoint flasher does.
+    </p>
+  </header>
+
+  <main>
+    <div id="browser-notice" class="notice warn" hidden>
+      This flasher needs WebSerial, which is only available in desktop <strong>Chrome</strong> or
+      <strong>Edge</strong> (not Firefox or Safari, not mobile browsers).
+    </div>
+
+    <section>
+      <h2>1. Device</h2>
+      <label for="device">Your reader</label>
+      <select id="device"></select>
+      <p id="first-install-note" class="notice" hidden>
+        Sticky and PaperMono: this page only updates a device that already runs CrossPoint. A first install
+        from the stock firmware needs the bootloader and partition table replaced too; do that once with the
+        <a href="https://crosspointreader.com/#flash-tools">official flasher</a>, then come back here.
+      </p>
+    </section>
+
+    <section>
+      <h2>2. Firmware</h2>
+      <label for="release">Release</label>
+      <div class="row">
+        <select id="release"><option>Loading releases...</option></select>
+        <button id="refresh" type="button" class="secondary" title="Reload the release list">Reload</button>
+      </div>
+      <p id="release-info" class="hint"></p>
+
+      <details>
+        <summary>Flash a local .bin instead</summary>
+        <p class="hint">
+          Pick a <code>crosspoint-&lt;version&gt;-&lt;device&gt;.bin</code> downloaded from the
+          <a href="https://github.com/H1D/crosspoint-anki/releases">releases page</a>, or your own build
+          (<code>.pio/build/&lt;env&gt;/firmware.bin</code>). The file is checked for the ESP image format
+          and chip before anything is written.
+        </p>
+        <div class="row">
+          <input id="file" type="file" accept=".bin,application/octet-stream">
+          <button id="clear-file" type="button" class="secondary">Clear</button>
+        </div>
+        <p id="file-info" class="hint"></p>
+      </details>
+    </section>
+
+    <section>
+      <h2>3. Flash</h2>
+      <ol class="prep">
+        <li>Wake or unlock the reader and connect it to this computer with a USB-C data cable.</li>
+        <li>No button combination is needed: the flasher puts the chip into download mode over USB.
+          Do not press Reset while flashing.</li>
+        <li>Click the button below and pick the device in the browser's serial port dialog
+          (it appears as a USB JTAG/serial or CrossPoint port).</li>
+      </ol>
+      <button id="flash" type="button" class="primary">Connect &amp; Flash</button>
+
+      <ol id="steps" class="steps"></ol>
+      <div class="progress-row">
+        <span id="progress-label"></span>
+        <progress id="progress" value="0" max="100"></progress>
+      </div>
+      <div id="result" class="result" hidden></div>
+      <pre id="log" class="log" aria-live="polite"></pre>
+    </section>
+
+    <section class="help">
+      <h2>If the device does not show up</h2>
+      <ul>
+        <li>Try another USB port or cable (some cables are charge-only).</li>
+        <li>Close other programs that may hold the serial port (PlatformIO monitor, Arduino IDE).</li>
+        <li>Some Xteink X3/X4 units bought from third-party stores ship with USB flashing locked.
+          Those need the <a href="https://crosspointreader.com/#unlock-tool">Xteink Unlocker</a> once;
+          units bought from xteink.com are not locked.</li>
+        <li>On Linux, your user needs access to the port (usually the <code>dialout</code> or
+          <code>uucp</code> group).</li>
+      </ul>
+      <h2>What this does</h2>
+      <p>
+        The flasher reads the partition table at <code>0x8000</code>, reads <code>otadata</code> to find the
+        running OTA slot, writes the firmware into the other slot (<code>app0</code> or <code>app1</code>)
+        and then writes a new <code>otadata</code> entry so the bootloader boots it. The bootloader,
+        partition table, NVS settings and the previously running firmware stay in place. This is what
+        the device's own Wi-Fi OTA update does, over USB instead.
+      </p>
+      <p>
+        Command-line alternative: <code>esptool.py --chip esp32c3 write_flash 0x10000 firmware.bin</code>
+        (X3/X4; <code>esp32s3</code> for the others) writes <code>app0</code> directly, as in the
+        <a href="https://github.com/H1D/crosspoint-anki#install-firmware">README</a>.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <a href="https://github.com/H1D/crosspoint-anki">Source</a> ·
+    <a href="https://github.com/H1D/crosspoint-anki/releases">Releases</a> ·
+    <a href="https://github.com/H1D/crosspoint-anki/blob/develop/docs/anki/DECISIONS.md">Design notes</a> ·
+    Flash logic ported from <a href="https://github.com/crosspoint-reader/crosspoint-tools">crosspoint-tools</a> (MIT),
+    uses <a href="https://github.com/espressif/esptool-js">esptool-js</a> (Apache-2.0).
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -2,6 +2,11 @@ name: Compile Release
 
 # Build and attach firmware only after a release is published. The release tag
 # supplies both the source revision and the version in each asset name.
+#
+# crosspoint-anki: tags are <upstream version>-anki.<n> and must equal
+# `version = ` in platformio.ini (or <version>rc for a pre-release). Assets stay
+# crosspoint-<tag>-<device>.bin; the firmware's OTA check and the web flasher
+# (site/, deployed by pages.yml after this workflow) look for exactly those names.
 
 on:
   release:

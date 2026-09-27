@@ -135,6 +135,11 @@ class CrossPointWebServer {
   void handlePostOpdsServer();
   void handleDeleteOpdsServer();
 
+  // Anki account handlers (/api/anki); tokens are never sent, only hasToken
+  void handleGetAnkiAccounts() const;
+  void handlePostAnkiAccount();
+  void handleDeleteAnkiAccount();
+
   // Wi-Fi credential handlers
   void handleGetWifiNetworks() const;
   void handlePostWifiNetwork();

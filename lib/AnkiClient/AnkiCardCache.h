@@ -21,6 +21,11 @@ class AnkiCardCache {
   size_t count();
   // Loads the n-th card (0-based). Returns false past the end or on a bad line.
   bool load(size_t index, AnkiCard& out);
+  // Card id of every line, index-aligned with load(), in one pass that reads
+  // only the "card_id" number (0 for a line without one). Cheap enough to
+  // run when the review app opens, unlike load() per index.
+  std::vector<int64_t> cardIds();
+  static int64_t lineCardId(const std::string& line);
 
   struct Meta {
     AnkiCounts counts;

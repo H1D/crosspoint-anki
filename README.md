@@ -1,5 +1,24 @@
 # CrossPoint Reader
 
+> ## crosspoint-anki
+>
+> This is [H1D/crosspoint-anki](https://github.com/H1D/crosspoint-anki), a fork of CrossPoint Reader that adds
+> [Anki](https://apps.ankiweb.net/) to the reader: review your flashcards on the device (synced with AnkiWeb),
+> and add a word you looked up in the dictionary as a new note without leaving the book. Design notes and the
+> reasoning behind the choices are in [docs/anki/DECISIONS.md](docs/anki/DECISIONS.md); the layout of the added
+> code is in [docs/anki/ARCHITECTURE.md](docs/anki/ARCHITECTURE.md).
+>
+> - **Install / update**: use the fork's web flasher at https://h1d.github.io/crosspoint-anki/ (Chrome or Edge),
+>   or download `crosspoint-<version>-<device>.bin` from the fork's
+>   [releases](https://github.com/H1D/crosspoint-anki/releases) and flash it as described under
+>   [Install firmware](#install-firmware). The built-in Wi-Fi OTA update checks this fork's releases.
+> - **Versions**: releases are tagged `<upstream version>-anki.<n>` (for example `1.6.5-anki.1` is the first
+>   fork build on top of upstream 1.6.5). The tag must match `version` in `platformio.ini`; publishing a GitHub
+>   release builds all five device targets and attaches the firmware files.
+>
+> Everything below is the upstream README.
+
+
 [![Fund contributors](https://img.shields.io/badge/%F0%9F%91%91_Fund_contributors-royalty.dev-BB953A?style=for-the-badge&labelColor=1a1a1a)](https://app.royalty.dev/crosspoint-reader/crosspoint-reader)
 
 CrossPoint is open-source e-reader firmware - community-built, fully hackable, free forever. It's maintained by a growing community of developers and readers who believe your device should do what you want - not what a manufacturer decided for you.

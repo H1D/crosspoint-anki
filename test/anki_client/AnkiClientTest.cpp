@@ -67,8 +67,10 @@ class MemFs final : public AnkiFs {
   bool mkdirs(const std::string&) override { return true; }
   bool removeDir(const std::string& path) override {
     for (auto it = files.begin(); it != files.end();) {
-      if (it->first.rfind(path + "/", 0) == 0) it = files.erase(it);
-      else ++it;
+      if (it->first.rfind(path + "/", 0) == 0)
+        it = files.erase(it);
+      else
+        ++it;
     }
     return true;
   }
@@ -91,13 +93,14 @@ class FakeHttp final : public AnkiHttp {
   std::vector<Seen> seen;
   size_t chunk = 7;  // feed bodies in odd-sized chunks to exercise streaming
 
-  int request(const char* method, const std::string& url, const std::vector<Header>& headers,
-              const std::string& body, const DataCallback& onData) override {
+  int request(const char* method, const std::string& url, const std::vector<Header>& headers, const std::string& body,
+              const DataCallback& onData) override {
     seen.push_back({method, url, headers, body});
     for (const auto& [key, canned] : responses) {
       const std::string m = key.substr(0, key.find(' '));
       const std::string suffix = key.substr(key.find(' ') + 1);
-      if (m == method && url.size() >= suffix.size() && url.compare(url.size() - suffix.size(), suffix.size(), suffix) == 0) {
+      if (m == method && url.size() >= suffix.size() &&
+          url.compare(url.size() - suffix.size(), suffix.size(), suffix) == 0) {
         for (size_t i = 0; i < canned.body.size(); i += chunk) {
           const size_t n = std::min(chunk, canned.body.size() - i);
           if (!onData(canned.status, reinterpret_cast<const uint8_t*>(canned.body.data() + i), n)) break;
@@ -184,8 +187,8 @@ TEST(AnkiJson, KeysValuesAndNestingAcrossChunks) {
   const std::string doc = R"({"a":[1,-2.5e3,"s",true,null,{"b":false}],"c":"d"})";
   for (size_t i = 0; i < doc.size(); i++) r.feed(doc.data() + i, 1);
   EXPECT_FALSE(r.hasError());
-  const std::vector<std::string> want = {"{", "K:a", "[", "N:1", "N:-2.5e3", "S:s", "T", "null", "{", "K:b", "F", "}",
-                                         "]", "K:c", "S:d", "}"};
+  const std::vector<std::string> want = {"{", "K:a", "[", "N:1", "N:-2.5e3", "S:s", "T",   "null",
+                                         "{", "K:b", "F", "}",   "]",        "K:c", "S:d", "}"};
   EXPECT_EQ(events, want);
 }
 
@@ -197,7 +200,9 @@ TEST(AnkiJson, ToInt64) {
 
 // ---------------------------------------------------------------------------
 TEST(AnkiMarkup, StripsBidiIsolates) {
-  EXPECT_EQ(ankimarkup::stripBidiControls("<\xE2\x81\xA8" "10\xE2\x81\xA9m"), "<10m");
+  EXPECT_EQ(ankimarkup::stripBidiControls("<\xE2\x81\xA8"
+                                          "10\xE2\x81\xA9m"),
+            "<10m");
   EXPECT_EQ(ankimarkup::stripBidiControls("plain"), "plain");
 }
 
@@ -238,8 +243,9 @@ TEST(AnkiJournal, AppendLoadAck) {
   EXPECT_EQ(e[0].ease, 3);
   EXPECT_EQ(e[0].answeredAt, 1758880123);
   EXPECT_EQ(e[1].answeredAt, 0);
-  EXPECT_EQ(AnkiJournal::toReviewsJson(e),
-            R"([{"client_id":"dev-1","card_id":111,"ease":3,"answered_at":1758880123},{"client_id":"dev-2","card_id":112,"ease":1}])");
+  EXPECT_EQ(
+      AnkiJournal::toReviewsJson(e),
+      R"([{"client_id":"dev-1","card_id":111,"ease":3,"answered_at":1758880123},{"client_id":"dev-2","card_id":112,"ease":1}])");
   EXPECT_TRUE(j.removeAcked({"dev-1"}));
   e = j.load();
   ASSERT_EQ(e.size(), 1u);
@@ -284,7 +290,8 @@ TEST(AnkiNoteQueue, RoundTripAndRequestBody) {
 }
 
 TEST(AnkiNote, SentenceAndFront) {
-  const std::vector<std::string> words = {"First", "one.", "Het", "huis,", "is", "\xE2\x80\x9Cgroot.\xE2\x80\x9D", "Next", "sentence"};
+  const std::vector<std::string> words = {"First", "one.",    "Het", "huis,", "is", "\xE2\x80\x9Cgroot.\xE2\x80\x9D",
+                                          "Next",  "sentence"};
   EXPECT_EQ(ankinote::sentenceAround(words, 3), "Het huis, is \xE2\x80\x9Cgroot.\xE2\x80\x9D");
   EXPECT_EQ(ankinote::sentenceAround(words, 0), "First one.");
   EXPECT_EQ(ankinote::sentenceAround(words, 7), "Next sentence");
@@ -317,13 +324,44 @@ TEST(AnkiCardCache, LineRoundTrip) {
   EXPECT_EQ(back.mediaCount, 2);
 }
 
+TEST(AnkiCardCache, CardIdsSinglePass) {
+  EXPECT_EQ(AnkiCardCache::lineCardId("{\"card_id\":1790433421131,\"deck\":\"D\"}"), 1790433421131);
+  EXPECT_EQ(AnkiCardCache::lineCardId("{\"deck\":\"card_id\", \"card_id\": -7}"), -7);
+  EXPECT_EQ(AnkiCardCache::lineCardId("{\"deck\":\"D\"}"), 0);
+  EXPECT_EQ(AnkiCardCache::lineCardId("{\"card_id\":\"x\"}"), 0);
+
+  MemFs fs;
+  AnkiCardCache cache(fs, "/c/cards.jsonl", "/c/cache.json");
+  EXPECT_TRUE(cache.cardIds().empty());
+  AnkiCard c;
+  c.deck = "D";
+  c.q = std::string(3000, 'q');  // longer than the id scan cap
+  std::string text;
+  for (int64_t id : {int64_t{11}, int64_t{22}, int64_t{33}}) {
+    c.cardId = id;
+    text += AnkiCardCache::toLine(c);
+  }
+  text += "\n{\"deck\":\"no id\"}\n";
+  ASSERT_TRUE(fs.writeAllAtomic("/c/cards.jsonl", text));
+  const std::vector<int64_t> ids = cache.cardIds();
+  ASSERT_EQ(ids.size(), 4u);
+  EXPECT_EQ(ids[0], 11);
+  EXPECT_EQ(ids[2], 33);
+  EXPECT_EQ(ids[3], 0);
+  EXPECT_EQ(ids.size(), cache.count());
+  AnkiCard back;
+  ASSERT_TRUE(cache.load(2, back));
+  EXPECT_EQ(back.cardId, ids[2]);
+}
+
 // ---------------------------------------------------------------------------
 TEST(AnkiSyncEngine, ExchangeBody) {
   AnkiAccount a = testAccount();
   std::vector<AnkiJournal::Entry> reviews = {{"dev-1", 111, 3, 1758880123}};
   const std::string body = AnkiSyncEngine::buildExchangeBody(a, reviews, true, 15);
-  EXPECT_EQ(body,
-            R"({"reviews":[{"client_id":"dev-1","card_id":111,"ease":3,"answered_at":1758880123}],"want":{"decks":["Dutch::Common"],"kinds":["due","learning","new"],"limit":40,"max_new_per_day":5,"fields":"compact","render":"text"},"sync":"auto","sync_timeout_seconds":15})");
+  EXPECT_EQ(
+      body,
+      R"({"reviews":[{"client_id":"dev-1","card_id":111,"ease":3,"answered_at":1758880123}],"want":{"decks":["Dutch::Common"],"kinds":["due","learning","new"],"limit":40,"max_new_per_day":5,"fields":"compact","render":"text"},"sync":"auto","sync_timeout_seconds":15})");
   a.decks.clear();
   a.maxNewPerDay = 0;
   const std::string all = AnkiSyncEngine::buildExchangeBody(a, {}, true, 15);
@@ -394,7 +432,8 @@ TEST(AnkiSyncEngine, ExchangeErrorKeepsJournalAndCache) {
   fs.files[ankipaths::cardsFile(a.id)] = "old\n";
   AnkiJournal journal(fs, ankipaths::reviewsFile(a.id));
   journal.append({"dev-1", 111, 3, 0});
-  http.responses["POST /v1/p/alice/exchange"] = {401, R"({"error":{"code":"unauthorized","message":"token revoked","retryable":false}})"};
+  http.responses["POST /v1/p/alice/exchange"] = {
+      401, R"({"error":{"code":"unauthorized","message":"token revoked","retryable":false}})"};
 
   const auto r = engine.exchange(a, true);
   EXPECT_FALSE(r.ok);
@@ -421,7 +460,9 @@ TEST(AnkiSyncEngine, NonReviewAccountOnlyPushes) {
   EXPECT_TRUE(http.seen.empty());
   AnkiJournal journal(fs, ankipaths::reviewsFile(a.id));
   journal.append({"dev-1", 111, 3, 0});
-  http.responses["POST /v1/p/alice/exchange"] = {200, R"({"reviews":[{"status":"applied","client_id":"dev-1"}],"cards":[{"card_id":9,"q":"x","a":"y"}],"counts":{}})"};
+  http.responses["POST /v1/p/alice/exchange"] = {
+      200,
+      R"({"reviews":[{"status":"applied","client_id":"dev-1"}],"cards":[{"card_id":9,"q":"x","a":"y"}],"counts":{}})"};
   const auto r = engine.exchange(a, false);
   EXPECT_TRUE(r.ok);
   EXPECT_EQ(r.reviewsAcked, 1u);

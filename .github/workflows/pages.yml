@@ -1,0 +1,76 @@
+name: Deploy flasher site
+
+# Publishes site/ to GitHub Pages (https://h1d.github.io/crosspoint-anki/).
+# The page lists releases through the GitHub API at runtime, so there is no
+# build step. Release assets are mirrored into firmware/<tag>/ because the
+# browser can't fetch them from GitHub directly (release-assets.githubusercontent.com
+# sends no Access-Control-Allow-Origin header). Runs after "Compile Release"
+# so a new release's assets are picked up once they're attached.
+#
+# One-time setup: repository Settings -> Pages -> Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [develop, master]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_run:
+    workflows: ["Compile Release"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # A failed release build still deploys the site; the mirror just won't
+    # contain that release's assets.
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r site/. _site/
+
+      - name: Mirror firmware assets of recent releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MIRROR_RELEASES: "3"
+        run: |
+          set -euo pipefail
+          tags="$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit "$MIRROR_RELEASES" \
+                    --json tagName --jq '.[].tagName')"
+          for tag in $tags; do
+            dir="_site/firmware/$tag"
+            mkdir -p "$dir"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern 'crosspoint-*.bin' --dir "$dir" \
+              || echo "no firmware assets on $tag (yet)"
+            rmdir "$dir" 2>/dev/null || true
+          done
+          find _site/firmware -type f 2>/dev/null | sort || true
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

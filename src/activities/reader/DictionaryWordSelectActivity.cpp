@@ -1,24 +1,30 @@
 #include "DictionaryWordSelectActivity.h"
 
+#include <AnkiNoteQueue.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <Memory.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#include <algorithm>
 #include <cctype>
 #include <climits>
 #include <cstdlib>
 
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
+#include "anki/AnkiAddNoteActivity.h"
 #include "components/UITheme.h"
+#include "util/HtmlToPlainText.h"
 
 namespace {
 
 constexpr unsigned long POPUP_DURATION_MS = 1500;
 constexpr unsigned long WORD_REPEAT_START_MS = 500;
 constexpr unsigned long WORD_REPEAT_INTERVAL_MS = 500;
+// Longest dictionary definition kept as a note's Back field.
+constexpr size_t MAX_TRANSLATION_BYTES = 600;
 
 // A token is selectable when it has an ASCII alphanumeric or a non-ASCII
 // codepoint outside U+2000-U+206F (dashes, bullets and other General
@@ -38,6 +44,33 @@ bool isSelectableToken(const char* text) {
 }
 
 void indexBuildYield(void*) { vTaskDelay(1); }
+
+// Plain-text note field from a StarDict definition: HTML stripped, whitespace
+// runs collapsed (wrappedText only breaks on spaces), cut at a UTF-8 boundary.
+std::string definitionToTranslation(std::string definition) {
+  std::replace(definition.begin(), definition.end(), '\0', '\n');  // multi-type separators
+  std::string text = htmlToPlainText(definition);
+  std::string out;
+  out.reserve(std::min(text.size(), MAX_TRANSLATION_BYTES));
+  bool pendingSpace = false;
+  for (const char c : text) {
+    if (std::isspace(static_cast<unsigned char>(c))) {
+      pendingSpace = !out.empty();
+      continue;
+    }
+    if (pendingSpace) {
+      out.push_back(' ');
+      pendingSpace = false;
+    }
+    out.push_back(c);
+  }
+  if (out.size() > MAX_TRANSLATION_BYTES) {
+    size_t cut = MAX_TRANSLATION_BYTES;
+    while (cut > 0 && (static_cast<uint8_t>(out[cut]) & 0xC0) == 0x80) cut--;
+    out.resize(cut);
+  }
+  return out;
+}
 
 }  // namespace
 
@@ -152,32 +185,45 @@ void DictionaryWordSelectActivity::moveVertical(const int direction) {
   }
 }
 
-void DictionaryWordSelectActivity::performLookup() {
-  popup = Popup::Busy;
+void DictionaryWordSelectActivity::activateSelected() {
+  if (mode == Mode::AnkiAdd) {
+    performAnkiAdd();
+  } else {
+    performLookup();
+  }
+}
+
+void DictionaryWordSelectActivity::openDictionaryOnce() {
   if (!dictOpenAttempted) {
     dictOpenAttempted = true;
     dictOpenOk = dict.open(SETTINGS.dictionaryName);
     // needsIndex() opens and validates the .qidx sidecar, so ask it once per
     // open rather than once per word: the answer only changes when we build
-    // the sidecar ourselves, which is handled below.
+    // the sidecar ourselves, which is handled in lookupWord().
     dictNeedsIndex = dictOpenOk && dict.needsIndex();
   }
   popupMsg = dictNeedsIndex ? StrId::STR_DICT_INDEXING : StrId::STR_DICT_LOOKING_UP;
-  requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
+}
 
-  bool ok = dictOpenOk;
-  Dictionary::IndexResult indexResult = Dictionary::IndexResult::Ok;
-  if (ok && dictNeedsIndex) {
-    ok = dict.buildIndex(&indexBuildYield, nullptr, &indexResult);
-    dictNeedsIndex = !ok;  // a successful build leaves the sidecar fresh; a failed one retries
+bool DictionaryWordSelectActivity::lookupWord(const char* token, std::string& definition, std::string& headword) {
+  dictReady = dictOpenOk;
+  lastIndexResult = Dictionary::IndexResult::Ok;
+  if (dictReady && dictNeedsIndex) {
+    dictReady = dict.buildIndex(&indexBuildYield, nullptr, &lastIndexResult);
+    dictNeedsIndex = !dictReady;  // a successful build leaves the sidecar fresh; a failed one retries
   }
+  lastLookupResult = Dictionary::LookupResult::NotFound;
+  return dictReady && dict.lookup(token, definition, headword, &lastLookupResult);
+}
+
+void DictionaryWordSelectActivity::performLookup() {
+  popup = Popup::Busy;
+  openDictionaryOnce();
+  requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
 
   std::string definition;
   std::string headword;
-  Dictionary::LookupResult result = Dictionary::LookupResult::NotFound;
-  const bool found = ok && dict.lookup(words[selected].text, definition, headword, &result);
-
-  if (found) {
+  if (lookupWord(words[selected].text, definition, headword)) {
     popup = Popup::None;
     startActivityForResult(
         std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
@@ -188,11 +234,11 @@ void DictionaryWordSelectActivity::performLookup() {
   // Name the failure: a genuine miss is "Not found"; a word that WAS found but
   // couldn't be read is a real error — and we distinguish decompression from a
   // low-memory allocation from a generic read error.
-  if (!ok) {
+  if (!dictReady) {
     popup = Popup::Error;
     // An index build allocates a scan buffer, so it fails the same way lookups
     // do on a fragmented heap — name that rather than a generic error.
-    switch (indexResult) {
+    switch (lastIndexResult) {
       case Dictionary::IndexResult::LowMemory:
         popupMsg = StrId::STR_DICT_LOW_MEMORY;
         break;
@@ -205,7 +251,7 @@ void DictionaryWordSelectActivity::performLookup() {
         break;
     }
   } else {
-    switch (result) {
+    switch (lastLookupResult) {
       case Dictionary::LookupResult::Decompress:
         popup = Popup::Error;
         popupMsg = StrId::STR_DICT_DECOMPRESS_ERROR;
@@ -229,6 +275,50 @@ void DictionaryWordSelectActivity::performLookup() {
   requestUpdate();
 }
 
+void DictionaryWordSelectActivity::performAnkiAdd() {
+  std::string noteWord = ankinote::cleanWord(words[selected].text);
+  if (noteWord.empty()) return;
+
+  // Sentence context from the page words. A page holds a few hundred short
+  // tokens (~2KB of copies), freed before the modal opens.
+  std::string sentence;
+  {
+    std::vector<std::string> tokens;
+    tokens.reserve(words.size());
+    for (const auto& box : words) tokens.emplace_back(box.text);
+    sentence = ankinote::sentenceAround(tokens, static_cast<size_t>(selected));
+  }
+
+  // Translation is best effort: a configured dictionary that misses, fails or
+  // is absent leaves the Back field empty to fill in on the phone.
+  std::string translation;
+  if (SETTINGS.dictionaryName[0] != '\0') {
+    popup = Popup::Busy;
+    openDictionaryOnce();
+    requestUpdateAndWait();
+    std::string definition;
+    std::string headword;
+    if (lookupWord(noteWord.c_str(), definition, headword)) {
+      translation = definitionToTranslation(std::move(definition));
+    }
+    popup = Popup::None;
+  }
+
+  auto modal = makeUniqueNoThrow<AnkiAddNoteActivity>(renderer, mappedInput, std::move(noteWord), std::move(sentence),
+                                                      std::move(translation), bookTitle);
+  if (!modal) {
+    LOG_ERR("DICT", "OOM: AnkiAddNoteActivity");
+    popup = Popup::Error;
+    popupMsg = StrId::STR_ANKI_QUEUE_FAILED;
+    popupTime = millis();
+    requestUpdate();
+    return;
+  }
+  // The modal repaints the whole screen; the returning render must be full.
+  snapshotIdx = -1;
+  startActivityForResult(std::move(modal), [this](const ActivityResult&) { requestUpdate(); });
+}
+
 void DictionaryWordSelectActivity::loop() {
   if (popup == Popup::NotFound || popup == Popup::Error) {
     if (millis() - popupTime >= POPUP_DURATION_MS) {
@@ -243,7 +333,7 @@ void DictionaryWordSelectActivity::loop() {
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && !words.empty()) {
-    performLookup();
+    activateSelected();
     return;
   }
 
@@ -265,7 +355,7 @@ void DictionaryWordSelectActivity::loop() {
     const int hit = wordAt(tx, ty);
     if (hit >= 0) {
       selected = hit;
-      performLookup();
+      activateSelected();
     }
     return;
   }
@@ -335,15 +425,16 @@ bool DictionaryWordSelectActivity::drawHighlightWithSnapshot() {
 // spare gutter for them, so a hint box there would hide text.
 void DictionaryWordSelectActivity::drawHints() const {
   // No selectable word on this page: Confirm and navigation are all no-ops
-  // (guarded by words.empty() in loop()/performLookup), so only Back does
+  // (guarded by words.empty() in loop()), so only Back does
   // anything and only Back is hinted.
   if (words.empty()) {
     const auto labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     return;
   }
-  const auto labels = mappedInput.mapDirectionalLabels(tr(STR_BACK), tr(STR_LOOKUP), tr(STR_DIR_LEFT),
-                                                       tr(STR_DIR_RIGHT), tr(STR_DIR_UP), tr(STR_DIR_DOWN));
+  const char* confirmLabel = mode == Mode::AnkiAdd ? tr(STR_ANKI_ADD) : tr(STR_LOOKUP);
+  const auto labels = mappedInput.mapDirectionalLabels(tr(STR_BACK), confirmLabel, tr(STR_DIR_LEFT), tr(STR_DIR_RIGHT),
+                                                       tr(STR_DIR_UP), tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

@@ -4,23 +4,34 @@
 #include <I18n.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "activities/Activity.h"
 #include "util/Dictionary.h"
 
 // Word selection over the current reader page: Left/Right step through words
-// in reading order, Up/Down jump rows, Confirm looks the word up and opens
-// DictionaryDefinitionActivity, Back returns to the reader. On touch devices a
-// touch-down moves the highlight and a tap on a word looks it up directly.
+// in reading order, Up/Down jump rows, Confirm acts on the word, Back returns
+// to the reader. On touch devices a touch-down moves the highlight and a tap
+// on a word acts on it directly.
+//
+// Mode::Lookup opens DictionaryDefinitionActivity for the word. Mode::AnkiAdd
+// builds the sentence around the word from the page, looks up a translation
+// when a dictionary is configured (none required), and opens
+// AnkiAddNoteActivity to queue the note.
 class DictionaryWordSelectActivity final : public Activity {
  public:
+  enum class Mode : uint8_t { Lookup, AnkiAdd };
+
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
-                                        std::unique_ptr<Page> page, int marginLeft, int marginTop)
+                                        std::unique_ptr<Page> page, int marginLeft, int marginTop,
+                                        Mode mode = Mode::Lookup, std::string bookTitle = {})
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         marginLeft(marginLeft),
-        marginTop(marginTop) {}
+        marginTop(marginTop),
+        mode(mode),
+        bookTitle(std::move(bookTitle)) {}
 
   void onEnter() override;
   void loop() override;
@@ -44,13 +55,23 @@ class DictionaryWordSelectActivity final : public Activity {
   int closestInRow(uint16_t row, int centerX) const;
   int wordAt(int x, int y) const;
   void moveVertical(int direction);
+  // Confirm / tap on the selected word: performLookup() or performAnkiAdd().
+  void activateSelected();
   void performLookup();
+  void performAnkiAdd();
+  // Opens the dictionary once per activity and picks the busy popup text.
+  void openDictionaryOnce();
+  // Builds the index if needed, then looks `token` up. True on a hit; the
+  // failure detail lands in dictReady / lastIndexResult / lastLookupResult.
+  bool lookupWord(const char* token, std::string& definition, std::string& headword);
   bool drawHighlightWithSnapshot();
   void drawHints() const;
 
   std::unique_ptr<Page> page;
   const int marginLeft;
   const int marginTop;
+  const Mode mode;
+  const std::string bookTitle;
   int fontId = 0;
   int lineHeight = 0;
 
@@ -63,6 +84,9 @@ class DictionaryWordSelectActivity final : public Activity {
   bool dictOpenAttempted = false;
   bool dictOpenOk = false;
   bool dictNeedsIndex = false;
+  bool dictReady = false;  // open succeeded and the index is fresh
+  Dictionary::IndexResult lastIndexResult = Dictionary::IndexResult::Ok;
+  Dictionary::LookupResult lastLookupResult = Dictionary::LookupResult::NotFound;
 
   Popup popup = Popup::None;
   StrId popupMsg = StrId::STR_DICT_NOT_FOUND;

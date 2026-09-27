@@ -41,6 +41,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "anki/AnkiAccountStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
@@ -198,6 +199,8 @@ bool EpubReaderActivity::loadBook() {
     return false;
   }
   epub = std::move(loadedEpub);
+  // Decides whether the menu offers "Add to Anki"; a small SD read per book open.
+  ANKI_STORE.loadFromFile();
 
   ImageBlock::clearRenderFailures();
   ImageBlock::setExtractor(epub.get(), [](void* ctx, const char* src, const char* dest) {
@@ -331,6 +334,27 @@ void EpubReaderActivity::openDictionaryWordSelect() {
   startActivityForResult(std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page),
                                                                         orientedMarginLeft, orientedMarginTop),
                          [this](const ActivityResult&) { requestUpdate(); });
+}
+
+void EpubReaderActivity::openAnkiWordSelect() {
+  if (!section || !epub) return;
+  auto page = section->loadPage(section->currentPage);
+  if (!page) return;
+
+  int orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft;
+  renderer.getOrientedViewableTRBL(&orientedMarginTop, &orientedMarginRight, &orientedMarginBottom,
+                                   &orientedMarginLeft);
+  orientedMarginTop += SETTINGS.screenMargin;
+  orientedMarginLeft += SETTINGS.screenMargin;
+
+  auto activity = makeUniqueNoThrow<DictionaryWordSelectActivity>(
+      renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop,
+      DictionaryWordSelectActivity::Mode::AnkiAdd, epub->getTitle());
+  if (!activity) {
+    LOG_ERR("ERS", "OOM: DictionaryWordSelectActivity");
+    return;
+  }
+  startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
 }
 
 void EpubReaderActivity::openFootnoteSelect(const bool reopenMenuOnCancel) {
@@ -493,6 +517,7 @@ void EpubReaderActivity::loop() {
     case HomeButtonAction::Bookmark:
     case HomeButtonAction::Sync:
     case HomeButtonAction::Dictionary:
+    case HomeButtonAction::AnkiAdd:
     case HomeButtonAction::Footnotes:
       automaticPageTurnActive = false;
       break;
@@ -558,6 +583,9 @@ void EpubReaderActivity::loop() {
       case CrossPointSettings::LP_MENU_DICTIONARY:
         openDictionaryWordSelect();
         return;
+      case CrossPointSettings::LP_MENU_ANKI:
+        openAnkiWordSelect();
+        return;
       case CrossPointSettings::LP_MENU_READER_MENU:
       case CrossPointSettings::LP_MENU_DISABLED:
       default:
@@ -580,6 +608,9 @@ void EpubReaderActivity::loop() {
         return;
       case HomeButtonAction::Dictionary:
         if (!showDictionaryMessage) openDictionaryWordSelect();
+        return;
+      case HomeButtonAction::AnkiAdd:
+        openAnkiWordSelect();
         return;
       case HomeButtonAction::ReaderMenu:
         if (usesToolbarMenu() && section)
@@ -886,6 +917,10 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       openDictionaryWordSelect();
       break;
     }
+    case EpubReaderMenuActivity::MenuAction::ANKI_ADD: {
+      openAnkiWordSelect();
+      break;
+    }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {
       if (section && section->currentPage >= 0 && section->currentPage < section->pageCount) {
         std::string fullText = section->getTextFromSectionFile();
@@ -949,6 +984,7 @@ unsigned long EpubReaderActivity::confirmLongPressThreshold() const {
   switch (SETTINGS.longPressMenuFunction) {
     case CrossPointSettings::LP_MENU_BOOKMARK:
     case CrossPointSettings::LP_MENU_DICTIONARY:
+    case CrossPointSettings::LP_MENU_ANKI:
       return ReaderUtils::BOOKMARK_HOLD_MS;
     case CrossPointSettings::LP_MENU_KOSYNC:
       return KOREADER_STORE.hasCredentials() ? ReaderUtils::GO_HOME_MS : 0;
