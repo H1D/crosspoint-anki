@@ -336,7 +336,7 @@ void EpubReaderActivity::openDictionaryWordSelect() {
                          [this](const ActivityResult&) { requestUpdate(); });
 }
 
-void EpubReaderActivity::openAnkiWordSelect() {
+void EpubReaderActivity::openAnkiWordSelect(const int touchX, const int touchY) {
   if (!section || !epub) return;
   auto page = section->loadPage(section->currentPage);
   if (!page) return;
@@ -349,7 +349,7 @@ void EpubReaderActivity::openAnkiWordSelect() {
 
   auto activity = makeUniqueNoThrow<DictionaryWordSelectActivity>(
       renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop,
-      DictionaryWordSelectActivity::Mode::AnkiAdd, epub->getTitle());
+      DictionaryWordSelectActivity::Mode::AnkiAdd, epub->getTitle(), touchX, touchY);
   if (!activity) {
     LOG_ERR("ERS", "OOM: DictionaryWordSelectActivity");
     return;
@@ -620,6 +620,19 @@ void EpubReaderActivity::loop() {
         return;
       default:
         break;
+    }
+  }
+
+  // Touch long-press on a word opens the Anki picker on it. wasScreenLongPress
+  // fires once and suppresses the rest of the contact, so the lift is not also
+  // a tap; it is only polled when the picker can actually open.
+  if (!atEndOfBook && !endOfBookMenuOpen && section && mappedInput.hasTouch() && ANKI_STORE.hasEnabledAccounts()) {
+    int touchX = 0;
+    int touchY = 0;
+    if (mappedInput.wasScreenLongPress(touchX, touchY)) {
+      pendingManualTurn = 0;
+      openAnkiWordSelect(touchX, touchY);
+      return;
     }
   }
 

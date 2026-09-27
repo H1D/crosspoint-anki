@@ -83,10 +83,12 @@ void DictionaryWordSelectActivity::onEnter() {
   // full-repaint path as the fallback.
   snapshot = makeUniqueNoThrow<uint8_t[]>(SNAPSHOT_CAPACITY);
   extractWords();
-  // Start on the middle row's word nearest mid-screen instead of top-left:
-  // any word on the page is then at most half a page of moves away.
+  // Start on the touched word when given one, else on the middle row's word
+  // nearest mid-screen instead of top-left: any word on the page is then at
+  // most half a page of moves away.
   if (!words.empty()) {
-    const int initial = closestInRow(rowCount / 2, renderer.getScreenWidth() / 2);
+    int initial = initialX >= 0 && initialY >= 0 ? wordAt(initialX, initialY) : -1;
+    if (initial < 0) initial = closestInRow(rowCount / 2, renderer.getScreenWidth() / 2);
     if (initial >= 0) selected = initial;
   }
   requestUpdate();

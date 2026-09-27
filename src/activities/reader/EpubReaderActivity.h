@@ -163,7 +163,8 @@ class EpubReaderActivity final : public ReaderActivity {
   void openFootnoteSelect(bool reopenMenuOnCancel);
   void openDictionaryWordSelect();
   // Word select in AnkiAdd mode; needs an enabled Anki account, not a dictionary.
-  void openAnkiWordSelect();
+  // A touch point (from a long-press on the page) preselects the word under it.
+  void openAnkiWordSelect(int touchX = -1, int touchY = -1);
   bool launchKOReaderSync();
   unsigned long confirmLongPressThreshold() const;
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);

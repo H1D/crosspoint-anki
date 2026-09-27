@@ -25,13 +25,16 @@ class DictionaryWordSelectActivity final : public Activity {
 
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                         std::unique_ptr<Page> page, int marginLeft, int marginTop,
-                                        Mode mode = Mode::Lookup, std::string bookTitle = {})
+                                        Mode mode = Mode::Lookup, std::string bookTitle = {}, int initialX = -1,
+                                        int initialY = -1)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         marginLeft(marginLeft),
         marginTop(marginTop),
         mode(mode),
-        bookTitle(std::move(bookTitle)) {}
+        bookTitle(std::move(bookTitle)),
+        initialX(initialX),
+        initialY(initialY) {}
 
   void onEnter() override;
   void loop() override;
@@ -72,6 +75,9 @@ class DictionaryWordSelectActivity final : public Activity {
   const int marginTop;
   const Mode mode;
   const std::string bookTitle;
+  // Screen point to preselect from (a touch long-press on the page); -1 = none.
+  const int initialX;
+  const int initialY;
   int fontId = 0;
   int lineHeight = 0;
 
