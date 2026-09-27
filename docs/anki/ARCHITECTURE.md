@@ -13,11 +13,14 @@ lib/AnkiClient/          host-testable core (no Arduino types, no ArduinoJson)
   AnkiPaths.h            SD layout under /.crosspoint/anki/<account id>/
   AnkiJson.*             streaming JSON reader + string quoting
   AnkiMarkup.*           AnkiDo text markup -> styled runs; bidi-control stripping
+  AnkiHtml.*             Anki card HTML -> the same markup (AnkiConnect path)
   AnkiJournal.*          pending reviews (reviews.jsonl)
   AnkiNoteQueue.*        pending add-word notes (notes.jsonl) + ankinote:: builders
   AnkiCardCache.*        cached queue (cards.jsonl + cache.json)
-  AnkiSyncEngine.*       one sync session per account (exchange, notes, decks)
+  AnkiSyncEngine.*       one sync session per account (exchange, notes, decks); dispatches per backend
+  AnkiConnectClient.*    the same three steps spoken as AnkiConnect actions (Anki desktop)
 test/anki_client/        gtest suite: cmake -S test -B build/test && cmake --build build/test --target AnkiClientTest
+scripts/anki/mock_ankiconnect.py  stand-in AnkiConnect for simulator runs (python3 scripts/anki/mock_ankiconnect.py 8777)
 
 src/anki/                firmware side
   AnkiStorageFs.*        AnkiFs over HalStorage      -> AnkiStorageFs::instance()
@@ -82,6 +85,11 @@ auto runs = ankimarkup::parse(card.q);       // bold/italic/cloze/newline runs; 
 ```
 
 Deck names for pickers: `engine.loadDecks(account.id)` (cached by the last sync).
+
+Backends: `account.backend` (`AnkiBackend::AnkiDo` or `AnkiConnect`) decides
+which server the engine talks to. Activities never branch on it; the only
+visible differences are the editor labels (URL / token vs. AnkiConnect URL /
+API key) and empty `card.next[]` labels for AnkiConnect cards.
 
 ## Invariants every agent must keep
 

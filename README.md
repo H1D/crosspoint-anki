@@ -3,7 +3,7 @@
 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) firmware with [Anki](https://apps.ankiweb.net/) built in.
 Everything else is stock CrossPoint ([upstream README](https://github.com/crosspoint-reader/crosspoint-reader#readme)).
 
-**Needs an [AnkiDo](https://github.com/H1D/AnkiDo) server** on your network. It syncs with AnkiWeb; the reader only talks to it.
+**Needs a server on your network:** either [AnkiDo](https://github.com/H1D/AnkiDo) (syncs with AnkiWeb for you) or Anki desktop with the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on (the reader talks to Anki on your PC directly; AnkiConnect must listen on your LAN address, see its `webBindAddress` setting).
 
 ## Features
 
@@ -18,11 +18,16 @@ Everything else is stock CrossPoint ([upstream README](https://github.com/crossp
 
 **<https://h1d.github.io/crosspoint-anki/>** — Chrome or Edge, USB cable, pick your device and release, Connect & Flash.
 
-Then set up an account: File Transfer on the reader → `http://<reader-ip>/settings` → Anki accounts (AnkiDo URL, profile, token from `ankido token create --profile <name> --scopes read,review,add`). Or drop `/.crosspoint/anki.json` on the SD card:
+Then set up an account: File Transfer on the reader → `http://<reader-ip>/settings` → Anki accounts. Pick the server type, then either AnkiDo URL, profile and token (from `ankido token create --profile <name> --scopes read,review,add`), or the AnkiConnect URL (`http://<pc-ip>:8765`), optionally the Anki profile to load and the add-on's API key. Or drop `/.crosspoint/anki.json` on the SD card:
 
 ```json
-{"accounts":[{"name":"me","url":"http://192.168.1.10:8766","profile":"me","token":"akd_...","enabled":true}]}
+{"accounts":[
+  {"name":"me","url":"http://192.168.1.10:8766","profile":"me","token":"akd_...","enabled":true},
+  {"name":"pc","backend":"ankiconnect","url":"http://192.168.1.20:8765","enabled":true}
+]}
 ```
+
+With AnkiConnect the grade buttons show no "next interval" hints (the add-on has no preview call), and reviews are dated at sync time.
 
 Updates: Settings → System → Check for updates.
 

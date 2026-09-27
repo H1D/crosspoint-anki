@@ -37,7 +37,9 @@ std::string statusText(int status) {
 }  // namespace
 
 std::vector<AnkiHttp::Header> AnkiSyncEngine::authHeaders(const AnkiAccount& account) const {
-  return {{"Authorization", "Bearer " + account.token}, {"Content-Type", "application/json"}, {"Accept", "application/json"}};
+  return {{"Authorization", "Bearer " + account.token},
+          {"Content-Type", "application/json"},
+          {"Accept", "application/json"}};
 }
 
 void AnkiSyncEngine::classify(Result& r, int status) {
@@ -73,6 +75,7 @@ std::string AnkiSyncEngine::buildExchangeBody(const AnkiAccount& account,
 }
 
 AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool wantCards) {
+  if (account.isAnkiConnect()) return connect.exchange(account, wantCards);
   Result r;
   AnkiJournal journal(fs, ankipaths::reviewsFile(account.id));
   const std::vector<AnkiJournal::Entry> pending = journal.load();
@@ -114,11 +117,16 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool
     key = k;
     if (depth == 1) {
       topKey = k;
-      if (k == "reviews") section = Section::Reviews;
-      else if (k == "cards") section = Section::Cards;
-      else if (k == "counts") section = Section::Counts;
-      else if (k == "sync") section = Section::Sync;
-      else section = Section::Other;
+      if (k == "reviews")
+        section = Section::Reviews;
+      else if (k == "cards")
+        section = Section::Cards;
+      else if (k == "counts")
+        section = Section::Counts;
+      else if (k == "sync")
+        section = Section::Sync;
+      else
+        section = Section::Other;
     }
   };
   cb.onObjectStart = [&]() {
@@ -145,8 +153,10 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool
   };
   cb.onArrayStart = [&]() {
     if (section == Section::Cards && depth == cardDepth) {
-      if (key == "next") nextIndex = 0;
-      else if (key == "media") inMediaArray = true;
+      if (key == "next")
+        nextIndex = 0;
+      else if (key == "media")
+        inMediaArray = true;
     }
   };
   cb.onArrayEnd = [&]() {
@@ -161,10 +171,14 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool
       } else if (inMediaArray) {
         card.mediaCount++;
       } else if (depth == cardDepth) {
-        if (key == "deck") card.deck = v;
-        else if (key == "kind") card.kind = v;
-        else if (key == "q") card.q = v;
-        else if (key == "a") card.a = v;
+        if (key == "deck")
+          card.deck = v;
+        else if (key == "kind")
+          card.kind = v;
+        else if (key == "q")
+          card.q = v;
+        else if (key == "a")
+          card.a = v;
       }
     } else if (section == Section::Reviews && depth == 2) {
       if (key == "client_id") reviewClientId = v;
@@ -178,10 +192,14 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool
       card.cardId = ankijson::toInt64(v);
     } else if (section == Section::Counts && depth == 2) {
       const int64_t n = ankijson::toInt64(v);
-      if (key == "new") counts.newCount = static_cast<uint16_t>(n);
-      else if (key == "learning") counts.learning = static_cast<uint16_t>(n);
-      else if (key == "due") counts.due = static_cast<uint16_t>(n);
-      else if (key == "returned") counts.returned = static_cast<uint16_t>(n);
+      if (key == "new")
+        counts.newCount = static_cast<uint16_t>(n);
+      else if (key == "learning")
+        counts.learning = static_cast<uint16_t>(n);
+      else if (key == "due")
+        counts.due = static_cast<uint16_t>(n);
+      else if (key == "returned")
+        counts.returned = static_cast<uint16_t>(n);
     }
   };
   ankijson::Reader reader(std::move(cb));
@@ -237,6 +255,7 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool
 }
 
 AnkiSyncEngine::Result AnkiSyncEngine::pushNotes(const AnkiAccount& account) {
+  if (account.isAnkiConnect()) return connect.pushNotes(account);
   Result r;
   AnkiNoteQueue queue(fs, ankipaths::notesFile(account.id));
   const std::vector<AnkiNoteQueue::Note> notes = queue.load();
@@ -269,9 +288,12 @@ AnkiSyncEngine::Result AnkiSyncEngine::pushNotes(const AnkiAccount& account) {
     depth--;
   };
   cb.onString = [&](const std::string& v) {
-    if (depth == 2 && key == "client_id") clientId = v;
-    else if (depth == 2 && key == "status") status = v;
-    else if (depth == 3 && key == "message" && firstError.empty()) firstError = v;
+    if (depth == 2 && key == "client_id")
+      clientId = v;
+    else if (depth == 2 && key == "status")
+      status = v;
+    else if (depth == 3 && key == "message" && firstError.empty())
+      firstError = v;
   };
   ankijson::Reader reader(std::move(cb));
 
@@ -304,12 +326,13 @@ AnkiSyncEngine::Result AnkiSyncEngine::pushNotes(const AnkiAccount& account) {
 }
 
 AnkiSyncEngine::Result AnkiSyncEngine::fetchDecks(const AnkiAccount& account) {
+  if (account.isAnkiConnect()) return connect.fetchDecks(account);
   Result r;
   fs.mkdirs(ankipaths::accountDir(account.id));
   // Re-serialize the deck list compactly while it streams:
   // {"decks":[{"name":..,"new":..,"learning":..,"due":..},...]}
-  std::string out = "{\"decks\":[";
-  bool first = true;
+  std::vector<AnkiDeck> decks;
+  decks.reserve(16);
   std::string key;
   AnkiDeck deck;
   int depth = 0;
@@ -320,14 +343,7 @@ AnkiSyncEngine::Result AnkiSyncEngine::fetchDecks(const AnkiAccount& account) {
     if (depth == 2) deck = AnkiDeck();
   };
   cb.onObjectEnd = [&]() {
-    if (depth == 2 && !deck.name.empty()) {
-      if (!first) out.push_back(',');
-      first = false;
-      out += "{\"name\":";
-      ankijson::appendQuoted(out, deck.name);
-      out += ",\"new\":" + std::to_string(deck.newCount) + ",\"learning\":" + std::to_string(deck.learning) +
-             ",\"due\":" + std::to_string(deck.due) + "}";
-    }
+    if (depth == 2 && !deck.name.empty()) decks.push_back(deck);
     depth--;
   };
   cb.onString = [&](const std::string& v) {
@@ -336,9 +352,12 @@ AnkiSyncEngine::Result AnkiSyncEngine::fetchDecks(const AnkiAccount& account) {
   cb.onNumber = [&](const std::string& v) {
     if (depth != 2) return;
     const int64_t n = ankijson::toInt64(v);
-    if (key == "new") deck.newCount = static_cast<uint16_t>(n);
-    else if (key == "learning") deck.learning = static_cast<uint16_t>(n);
-    else if (key == "due") deck.due = static_cast<uint16_t>(n);
+    if (key == "new")
+      deck.newCount = static_cast<uint16_t>(n);
+    else if (key == "learning")
+      deck.learning = static_cast<uint16_t>(n);
+    else if (key == "due")
+      deck.due = static_cast<uint16_t>(n);
   };
   ankijson::Reader reader(std::move(cb));
 
@@ -364,44 +383,19 @@ AnkiSyncEngine::Result AnkiSyncEngine::fetchDecks(const AnkiAccount& account) {
     r.error = "Bad response";
     return r;
   }
-  out += "]}";
-  if (!fs.writeAllAtomic(ankipaths::decksFile(account.id), out)) {
+  if (!fs.writeAllAtomic(ankipaths::decksFile(account.id), ankidecks::toJson(decks))) {
     r.ok = false;
     r.error = "SD write failed";
+    return r;
   }
+  r.decksFetched = decks.size();
   return r;
 }
 
 std::vector<AnkiDeck> AnkiSyncEngine::loadDecks(uint32_t accountId) {
-  std::vector<AnkiDeck> decks;
   std::string text;
-  if (!fs.readAll(ankipaths::decksFile(accountId), text)) return decks;
-  std::string key;
-  AnkiDeck deck;
-  int depth = 0;
-  ankijson::Reader::Callbacks cb;
-  cb.onKey = [&](const std::string& k) { key = k; };
-  cb.onObjectStart = [&]() {
-    depth++;
-    if (depth == 2) deck = AnkiDeck();
-  };
-  cb.onObjectEnd = [&]() {
-    if (depth == 2 && !deck.name.empty()) decks.push_back(deck);
-    depth--;
-  };
-  cb.onString = [&](const std::string& v) {
-    if (depth == 2 && key == "name") deck.name = v;
-  };
-  cb.onNumber = [&](const std::string& v) {
-    if (depth != 2) return;
-    const int64_t n = ankijson::toInt64(v);
-    if (key == "new") deck.newCount = static_cast<uint16_t>(n);
-    else if (key == "learning") deck.learning = static_cast<uint16_t>(n);
-    else if (key == "due") deck.due = static_cast<uint16_t>(n);
-  };
-  ankijson::Reader reader(std::move(cb));
-  reader.feed(text);
-  return decks;
+  if (!fs.readAll(ankipaths::decksFile(accountId), text)) return {};
+  return ankidecks::fromJson(text);
 }
 
 bool AnkiSyncEngine::hasPending(const AnkiAccount& account) {
@@ -427,6 +421,8 @@ AnkiSyncEngine::Result AnkiSyncEngine::syncAccount(const AnkiAccount& account, b
   }
   if (total.error.empty()) total.error = notes.error;  // per-note failure text, informational
 
+  if (total.decksFetched > 0) return total;  // AnkiConnect refreshes the deck cache while fetching the queue
+
   const Result decks = fetchDecks(account);
   if (!decks.ok) {
     // Deck list is a convenience; a failure here does not fail the session,
@@ -435,3 +431,54 @@ AnkiSyncEngine::Result AnkiSyncEngine::syncAccount(const AnkiAccount& account, b
   }
   return total;
 }
+
+namespace ankidecks {
+
+std::string toJson(const std::vector<AnkiDeck>& decks) {
+  std::string out = "{\"decks\":[";
+  for (size_t i = 0; i < decks.size(); i++) {
+    if (i) out.push_back(',');
+    out += "{\"name\":";
+    ankijson::appendQuoted(out, decks[i].name);
+    out += ",\"new\":" + std::to_string(decks[i].newCount) + ",\"learning\":" + std::to_string(decks[i].learning) +
+           ",\"due\":" + std::to_string(decks[i].due) + "}";
+  }
+  out += "]}";
+  return out;
+}
+
+std::vector<AnkiDeck> fromJson(const std::string& text) {
+  std::vector<AnkiDeck> decks;
+  decks.reserve(16);
+  std::string key;
+  AnkiDeck deck;
+  int depth = 0;
+  ankijson::Reader::Callbacks cb;
+  cb.onKey = [&](const std::string& k) { key = k; };
+  cb.onObjectStart = [&]() {
+    depth++;
+    if (depth == 2) deck = AnkiDeck();
+  };
+  cb.onObjectEnd = [&]() {
+    if (depth == 2 && !deck.name.empty()) decks.push_back(deck);
+    depth--;
+  };
+  cb.onString = [&](const std::string& v) {
+    if (depth == 2 && key == "name") deck.name = v;
+  };
+  cb.onNumber = [&](const std::string& v) {
+    if (depth != 2) return;
+    const int64_t n = ankijson::toInt64(v);
+    if (key == "new")
+      deck.newCount = static_cast<uint16_t>(n);
+    else if (key == "learning")
+      deck.learning = static_cast<uint16_t>(n);
+    else if (key == "due")
+      deck.due = static_cast<uint16_t>(n);
+  };
+  ankijson::Reader reader(std::move(cb));
+  reader.feed(text);
+  return decks;
+}
+
+}  // namespace ankidecks

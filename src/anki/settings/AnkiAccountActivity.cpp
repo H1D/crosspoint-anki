@@ -18,6 +18,7 @@ namespace fui = freeink::ui;
 namespace {
 enum Row : int {
   ROW_NAME = 0,
+  ROW_BACKEND,
   ROW_URL,
   ROW_PROFILE,
   ROW_TOKEN,
@@ -33,6 +34,10 @@ enum Row : int {
 constexpr const char* CACHE_SIZE_LABELS[] = {"20", "40", "60", "100"};
 constexpr uint8_t CACHE_SIZE_VALUES[] = {20, 40, 60, 100};
 
+const char* backendLabel(const AnkiBackend backend) {
+  return backend == AnkiBackend::AnkiConnect ? tr(STR_ANKI_BACKEND_ANKICONNECT) : tr(STR_ANKI_BACKEND_ANKIDO);
+}
+
 int indexOfValue(const uint8_t* values, const int count, const uint8_t value) {
   for (int i = 0; i < count; i++) {
     if (values[i] == value) return i;
@@ -46,9 +51,9 @@ AnkiAccountActivity::AnkiAccountActivity(GfxRenderer& renderer, MappedInputManag
   // Labels never change (the values track editAccount live), so they're set
   // once here rather than every buildScreen() call.
   static constexpr StrId fieldNames[BASE_ITEMS] = {
-      StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_SERVER_URL, StrId::STR_ANKI_PROFILE,
-      StrId::STR_ANKI_TOKEN,        StrId::STR_ANKI_ENABLED,    StrId::STR_ANKI_DECKS,
-      StrId::STR_ANKI_DEFAULT_DECK, StrId::STR_ANKI_NOTE_TYPE,  StrId::STR_ANKI_CACHE_SIZE};
+      StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_BACKEND,   StrId::STR_ANKI_SERVER_URL, StrId::STR_ANKI_PROFILE,
+      StrId::STR_ANKI_TOKEN,        StrId::STR_ANKI_ENABLED,   StrId::STR_ANKI_DECKS,      StrId::STR_ANKI_DEFAULT_DECK,
+      StrId::STR_ANKI_NOTE_TYPE,    StrId::STR_ANKI_CACHE_SIZE};
   for (int i = 0; i < BASE_ITEMS; i++) {
     fieldRowItems[i].label = I18N.get(fieldNames[i]);
     fieldRowItems[i].actionValue = static_cast<int16_t>(i);
@@ -80,6 +85,23 @@ void AnkiAccountActivity::onEnter() {
       accountIndex = -1;
     }
   }
+  refreshBackendLabels();
+}
+
+void AnkiAccountActivity::refreshBackendLabels() {
+  const bool connect = editAccount.isAnkiConnect();
+  fieldRowItems[ROW_URL].label = connect ? tr(STR_ANKI_ANKICONNECT_URL) : tr(STR_ANKI_SERVER_URL);
+  fieldRowItems[ROW_TOKEN].label = connect ? tr(STR_ANKI_API_KEY) : tr(STR_ANKI_TOKEN);
+}
+
+void AnkiAccountActivity::openBackendPicker() {
+  const char* const labels[] = {tr(STR_ANKI_BACKEND_ANKIDO), tr(STR_ANKI_BACKEND_ANKICONNECT)};
+  optionPopup.show(tr(STR_ANKI_BACKEND), labels, 2, editAccount.isAnkiConnect() ? 1 : 0, [this](int idx) {
+    editAccount.backend = idx == 1 ? AnkiBackend::AnkiConnect : AnkiBackend::AnkiDo;
+    refreshBackendLabels();
+    saveAccount();
+  });
+  requestUpdate();
 }
 
 void AnkiAccountActivity::reloadFromStore() {
@@ -133,7 +155,9 @@ bool AnkiAccountActivity::saveAccount() {
 void AnkiAccountActivity::editText(const StrId titleId, std::string AnkiAccount::* field, const size_t maxLength,
                                    const InputType type) {
   const std::string& current = editAccount.*field;
-  const std::string prefill = (type == InputType::Url && current.empty()) ? "https://" : current;
+  // AnkiConnect listens on plain http://localhost:8765 by default.
+  const char* scheme = editAccount.isAnkiConnect() ? "http://" : "https://";
+  const std::string prefill = (type == InputType::Url && current.empty()) ? scheme : current;
   auto handler = [this, field, type](const ActivityResult& result) {
     if (result.isCancelled) return;
     const auto& kb = std::get<KeyboardResult>(result.data);
@@ -211,15 +235,20 @@ void AnkiAccountActivity::handleSelection() {
     case ROW_NAME:
       editText(StrId::STR_ANKI_ACCOUNT_NAME, &AnkiAccount::name, 63, InputType::Text);
       break;
+    case ROW_BACKEND:
+      openBackendPicker();
+      break;
     case ROW_URL:
-      editText(StrId::STR_ANKI_SERVER_URL, &AnkiAccount::url, 127, InputType::Url);
+      editText(editAccount.isAnkiConnect() ? StrId::STR_ANKI_ANKICONNECT_URL : StrId::STR_ANKI_SERVER_URL,
+               &AnkiAccount::url, 127, InputType::Url);
       break;
     case ROW_PROFILE:
       editText(StrId::STR_ANKI_PROFILE, &AnkiAccount::profile, 63, InputType::Text);
       break;
     case ROW_TOKEN:
       // Fallback path; the web Settings page is the intended way to paste it.
-      editText(StrId::STR_ANKI_TOKEN, &AnkiAccount::token, 200, InputType::Text);
+      editText(editAccount.isAnkiConnect() ? StrId::STR_ANKI_API_KEY : StrId::STR_ANKI_TOKEN, &AnkiAccount::token, 200,
+               InputType::Text);
       break;
     case ROW_ENABLED:
       editAccount.enabled = !editAccount.enabled;
@@ -284,6 +313,7 @@ void AnkiAccountActivity::buildScreen(UiScreen& screen) {
   // Labels/actionValue were set once in the constructor; only the live
   // values (pointers into editAccount or the fixed number buffers) refresh.
   fieldRowItems[ROW_NAME].value = editAccount.name.empty() ? tr(STR_NOT_SET) : editAccount.name.c_str();
+  fieldRowItems[ROW_BACKEND].value = backendLabel(editAccount.backend);
   fieldRowItems[ROW_URL].value = editAccount.url.empty() ? tr(STR_NOT_SET) : editAccount.url.c_str();
   fieldRowItems[ROW_PROFILE].value = editAccount.profile.empty() ? tr(STR_NOT_SET) : editAccount.profile.c_str();
   fieldRowItems[ROW_TOKEN].value = editAccount.token.empty() ? tr(STR_NOT_SET) : "******";

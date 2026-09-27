@@ -1,7 +1,8 @@
 # crosspoint-anki: design decisions
 
 This fork adds Anki flashcard review and "add word from a book" to CrossPoint
-Reader, backed by an [AnkiDo](https://github.com/H1D/AnkiDo) server. This file
+Reader, backed by an [AnkiDo](https://github.com/H1D/AnkiDo) server or by
+AnkiConnect in Anki desktop. This file
 is the record of every decision that is not derivable from the code. Newest
 entries at the bottom of each section. Dates are when the decision was made.
 
@@ -17,8 +18,9 @@ stay cheap.
 
 ## Server (2026-09-26)
 
-- **AnkiDo is the only backend.** The device never holds AnkiWeb credentials; it
-  holds an AnkiDo base URL, a profile name and a bearer token with scopes
+- **AnkiDo is the only backend** (reversed 2026-09-28, see "AnkiConnect
+  backend" below). The device never holds AnkiWeb credentials; it holds an
+  AnkiDo base URL, a profile name and a bearer token with scopes
   `read,review,add`. `sync` scope is not needed: `POST /exchange` syncs inline.
 - Development instance: Docker Compose in `ankido-dev/` next to the clone (not
   in this repo), published on host port 8766 (8765 was taken on the dev
@@ -186,3 +188,59 @@ whole afterwards.
   every add. Now each account has an explicit "Deck for new words" setting
   (device editor and web card); the modal preselects it and a different pick
   in the modal is a one-off. The JSON key stays `lastDeck` for compatibility.
+
+## AnkiConnect backend (2026-09-28)
+
+- **Per-account "Server type": AnkiDo or AnkiConnect.** AnkiConnect is the
+  add-on inside Anki desktop (`http://<pc>:8765`), so people who run Anki on a
+  PC in the same network need no extra server. The account fields are reused:
+  `url` is the AnkiConnect endpoint, `profile` is the Anki profile to load
+  first (optional; `loadProfile` switches the desktop app), `token` is the
+  add-on's `apiKey` (optional). Stored as `"backend": "ankido" | "ankiconnect"`
+  in anki.json; absent = AnkiDo, so old files load unchanged.
+- **Same steps, same SD files.** `AnkiConnectClient` (lib/AnkiClient) fills
+  cards.jsonl, decks.json, reviews.jsonl and notes.jsonl exactly as the AnkiDo
+  path does; the review app, add-word and the pickers do not know which
+  backend an account uses. `AnkiSyncEngine` dispatches on `account.backend`.
+- **Queue = three searches, then cardsInfo in batches of 8.** AnkiConnect has
+  no scheduler queue call, so the device searches `is:learn`, `is:due
+  -is:learn` and `is:new` (suspended/buried excluded) within the account's
+  decks, in that order, up to "Cards per sync". New cards are additionally
+  capped by the decks' `getDeckStats.new_count`, which already honours the
+  deck's daily limit and today's introduced cards. Learning cards are taken
+  whether or not their intraday due time has passed: the device is offline
+  between syncs. `findCards` order is Anki's default (creation order), which
+  approximates new-card position.
+- **Card HTML is rendered on the device.** `cardsInfo` returns the note
+  type's CSS plus the rendered HTML; `AnkiHtml` turns it into the same
+  `**bold**`/`_italic_`/`[cloze]`/`[img:]` markup AnkiDo produces
+  (`collection/render.py` is the reference), so `AnkiMarkup` and the review
+  screen stay shared. The answer side is cut at `<hr id=answer>`. The converter
+  runs per string as the JSON streams, so one card's HTML is the most that is
+  ever in RAM.
+- **No "next" interval labels.** AnkiConnect has no per-card scheduling
+  preview; the grade footer shows only Again/Hard/Good/Easy for these
+  accounts. `card.next[]` stays empty in the cache line.
+- **Reviews: `answerCards`, graded "now".** There is no `client_id` and no
+  `answered_at`; a review is applied at the time of the sync. The whole batch
+  is dropped from the journal once the request was processed (`false` in the
+  result means the card no longer exists). A response lost after the server
+  applied it would grade those cards twice on the next sync; accepted, the
+  same as any AnkiConnect client.
+- **Notes: one `addNote` per queued note.** `addNotes` raises a combined
+  exception when any note fails and hides which ones were added, so notes go
+  one at a time. Field names come from `modelFieldNames` (first two fields of
+  the account's note type, cached per session; `Front`/`Back` when the lookup
+  fails), which removes the Front/Back limitation for this backend.
+  `allowDuplicate:false` with deck scope: a duplicate or empty note is dropped
+  as done (AnkiConnect cannot "update" like AnkiDo's `dedupe: update`); a
+  missing deck or note type keeps the note queued and shows the message.
+- **No AnkiWeb sync trigger.** AnkiConnect's `sync` action opens the login
+  dialog on the desktop when AnkiWeb is not configured; the desktop app syncs
+  on its own schedule instead. Can be revisited as an opt-in.
+- **Auth failure detection.** A wrong `apiKey` comes back as HTTP 200 with
+  `"error": "valid api key must be provided"`; that text sets `authFailed`, so
+  the sync screen shows the same "rejected" hint as an AnkiDo 401.
+- **Sleep-entry sync** works unchanged: `exchange(wantCards=false)` is one
+  `answerCards` request (plus `loadProfile` when a profile is set) and
+  `pushNotes` is one request per note, all under the same 4 s HTTP timeout.

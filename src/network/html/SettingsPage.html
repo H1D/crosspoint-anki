@@ -825,7 +825,7 @@
   }
 
   // --- Anki Account Management ---
-  // Editable list of AnkiDo accounts via the /api/anki endpoints. Tokens are
+  // Editable list of Anki accounts (AnkiDo or AnkiConnect) via the /api/anki endpoints. Tokens are
   // never sent back by the device; the "(unchanged)" placeholder means the
   // stored token is kept unless a new one is typed. Deck names come from the
   // device's per-account cache (filled by the first sync).
@@ -849,6 +849,7 @@
     defaultList.forEach(function(d) {
       defaultOptions += '<option value="' + escapeHtml(d) + '"' + (d === current ? ' selected' : '') + '>' + escapeHtml(d) + '</option>';
     });
+    const connect = acc.backend === 'ankiconnect';
     const deckControl = available.length === 0
       ? '<input type="text" id="anki-deckadd-' + id + '" placeholder="All decks (or names, comma-separated)">'
       : '<select multiple id="anki-decks-' + id + '" size="' + Math.min(available.length, 6) + '">' + deckOptions + '</select>' +
@@ -859,16 +860,23 @@
         '<span class="setting-control"><input type="text" id="anki-name-' + id + '" value="' + escapeHtml(acc.name || '') + '"></span>' +
       '</div>' +
       '<div class="setting-row">' +
-        '<span class="setting-name">AnkiDo URL</span>' +
-        '<span class="setting-control"><input type="text" id="anki-url-' + id + '" value="' + escapeHtml(acc.url || '') + '" placeholder="https://"></span>' +
+        '<span class="setting-name">Server type</span>' +
+        '<span class="setting-control"><select id="anki-backend-' + id + '" onchange="ankiBackendChanged(\'' + id + '\')">' +
+          '<option value="ankido"' + (connect ? '' : ' selected') + '>AnkiDo</option>' +
+          '<option value="ankiconnect"' + (connect ? ' selected' : '') + '>AnkiConnect (Anki desktop)</option>' +
+        '</select></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
+        '<span class="setting-name" id="anki-urllabel-' + id + '">' + (connect ? 'AnkiConnect URL' : 'AnkiDo URL') + '</span>' +
+        '<span class="setting-control"><input type="text" id="anki-url-' + id + '" value="' + escapeHtml(acc.url || '') + '" placeholder="' + (connect ? 'http://192.168.1.10:8765' : 'https://') + '"></span>' +
       '</div>' +
       '<div class="setting-row">' +
         '<span class="setting-name">Profile</span>' +
-        '<span class="setting-control"><input type="text" id="anki-profile-' + id + '" value="' + escapeHtml(acc.profile || '') + '"></span>' +
+        '<span class="setting-control"><input type="text" id="anki-profile-' + id + '" value="' + escapeHtml(acc.profile || '') + '" placeholder="' + (connect ? '(optional: Anki profile to load)' : '') + '"></span>' +
       '</div>' +
       '<div class="setting-row">' +
-        '<span class="setting-name">Token</span>' +
-        '<span class="setting-control"><input type="password" id="anki-token-' + id + '" placeholder="' + (acc.hasToken ? '(unchanged)' : '') + '"></span>' +
+        '<span class="setting-name" id="anki-tokenlabel-' + id + '">' + (connect ? 'API key' : 'Token') + '</span>' +
+        '<span class="setting-control"><input type="password" id="anki-token-' + id + '" placeholder="' + (acc.hasToken ? '(unchanged)' : (connect ? '(optional)' : '')) + '"></span>' +
       '</div>' +
       '<div class="setting-row">' +
         '<span class="setting-name">Enabled</span>' +
@@ -895,6 +903,15 @@
         (isNew ? '' : '<button class="btn-small btn-delete" onclick="deleteAnkiAccount(' + idx + ')">Delete</button>') +
       '</div>' +
     '</div>';
+  }
+
+  // Relabels the URL/token rows when the server type select changes; the
+  // values are only read on Save.
+  function ankiBackendChanged(id) {
+    const connect = document.getElementById('anki-backend-' + id).value === 'ankiconnect';
+    document.getElementById('anki-urllabel-' + id).textContent = connect ? 'AnkiConnect URL' : 'AnkiDo URL';
+    document.getElementById('anki-tokenlabel-' + id).textContent = connect ? 'API key' : 'Token';
+    document.getElementById('anki-url-' + id).placeholder = connect ? 'http://192.168.1.10:8765' : 'https://';
   }
 
   function renderAnkiSection() {
@@ -933,7 +950,7 @@
     // Prevent multiple unsaved new-account forms at once (idx -1 -> id "new")
     if (document.getElementById('anki-new')) return;
     addBtn.insertAdjacentHTML('beforebegin',
-      renderAnkiAccount({name:'',url:'',profile:'',hasToken:false,enabled:true,decks:[],availableDecks:[],model:'Basic',cacheSize:60}, -1));
+      renderAnkiAccount({name:'',backend:'ankido',url:'',profile:'',hasToken:false,enabled:true,decks:[],availableDecks:[],model:'Basic',cacheSize:60}, -1));
   }
 
   async function saveAnkiAccount(idx) {
@@ -948,6 +965,7 @@
     }
     const data = {
       name: document.getElementById('anki-name-' + id).value,
+      backend: document.getElementById('anki-backend-' + id).value,
       url: document.getElementById('anki-url-' + id).value,
       profile: document.getElementById('anki-profile-' + id).value,
       enabled: document.getElementById('anki-enabled-' + id).checked,

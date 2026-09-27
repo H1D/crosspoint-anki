@@ -8,7 +8,7 @@
 enum class InputType;  // activities/util/KeyboardEntryActivity.h
 
 /**
- * Edit screen for a single AnkiDo account. Every field edit is persisted
+ * Edit screen for a single Anki account (AnkiDo or AnkiConnect). Every field edit is persisted
  * immediately through ANKI_STORE (add on the first save of a new account,
  * update in place afterwards), like OpdsSettingsActivity.
  */
@@ -42,14 +42,17 @@ class AnkiAccountActivity final : public UiListActivity {
   bool saveAccount();
   void reloadFromStore();
   void editText(StrId titleId, std::string AnkiAccount::* field, size_t maxLength, InputType type);
+  void openBackendPicker();
+  void refreshBackendLabels();
   void openDeckPicker();
   void openDefaultDeckPicker();
   void saveDefaultDeck(const std::string& deck);
 
-  // Row storage: Name, URL, Profile, Token, Enabled, Decks, Deck for new words, Note type,
-  // Cards per sync + Delete (existing accounts only). Labels are
-  // set once in the constructor; buildScreen() only refreshes the values.
-  static constexpr int BASE_ITEMS = 9;
+  // Row storage: Name, Server type, URL, Profile, Token, Enabled, Decks, Deck for new words,
+  // Note type, Cards per sync + Delete (existing accounts only). Labels are
+  // set once in the constructor (URL and token labels follow the server type);
+  // buildScreen() only refreshes the values.
+  static constexpr int BASE_ITEMS = 10;
   static constexpr int MAX_MENU_ITEMS = BASE_ITEMS + 1;
   freeink::ui::ListItem fieldRowItems[MAX_MENU_ITEMS]{};
   // Numeric values rendered into fixed buffers (no per-render allocation).

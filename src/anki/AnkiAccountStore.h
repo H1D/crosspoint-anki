@@ -8,7 +8,8 @@
 #include <vector>
 
 /**
- * Singleton store for AnkiDo accounts, persisted at /.crosspoint/anki.json.
+ * Singleton store for Anki accounts (AnkiDo or AnkiConnect, "backend" key),
+ * persisted at /.crosspoint/anki.json.
  * Tokens are XOR-obfuscated with the device MAC and base64-encoded on disk
  * (token_obf); a plain "token" key written by hand is accepted and rewritten
  * obfuscated on the next save. Each account gets a stable numeric id that

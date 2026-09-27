@@ -6,6 +6,8 @@ add_executable(AnkiClientTest
   ${REPO_ROOT}/lib/AnkiClient/AnkiNoteQueue.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiCardCache.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiSyncEngine.cpp
+  ${REPO_ROOT}/lib/AnkiClient/AnkiConnectClient.cpp
+  ${REPO_ROOT}/lib/AnkiClient/AnkiHtml.cpp
 )
 
 target_include_directories(AnkiClientTest PRIVATE

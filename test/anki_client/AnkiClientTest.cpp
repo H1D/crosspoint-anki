@@ -532,3 +532,260 @@ TEST(AnkiSyncEngine, SyncAccountRunsAllSteps) {
   EXPECT_FALSE(engine.hasPending(a));
   EXPECT_EQ(engine.loadDecks(a.id).size(), 1u);
 }
+
+// ---------------------------------------------------------------------------
+// AnkiConnect backend
+#include "AnkiConnectClient.h"
+#include "AnkiHtml.h"
+
+namespace {
+
+AnkiAccount connectAccount() {
+  AnkiAccount a;
+  a.id = 5;
+  a.name = "Desktop";
+  a.backend = AnkiBackend::AnkiConnect;
+  a.url = "http://desk.local:8765";
+  a.profile = "";
+  a.token = "";
+  a.decks = {"Dutch::Common"};
+  a.cacheSize = 10;
+  return a;
+}
+
+// Routes AnkiConnect actions by the "action" in the request body.
+class FakeConnect final : public AnkiHttp {
+ public:
+  std::map<std::string, std::string> responses;  // action -> body
+  std::vector<std::string> bodies;
+  int status = 200;
+
+  int request(const char*, const std::string&, const std::vector<Header>&, const std::string& body,
+              const DataCallback& onData) override {
+    bodies.push_back(body);
+    const size_t p = body.find("\"action\":\"") + 10;
+    const std::string action = body.substr(p, body.find('"', p) - p);
+    auto it = responses.find(action);
+    const std::string resp = it == responses.end() ? "{\"result\":null,\"error\":\"unsupported action\"}" : it->second;
+    for (size_t i = 0; i < resp.size(); i += 5) {
+      const size_t n = std::min<size_t>(5, resp.size() - i);
+      if (!onData(status, reinterpret_cast<const uint8_t*>(resp.data() + i), n)) break;
+    }
+    return status;
+  }
+  size_t count(const char* action) const {
+    size_t n = 0;
+    for (const auto& b : bodies)
+      if (b.find(std::string("\"action\":\"") + action + "\"") != std::string::npos) n++;
+    return n;
+  }
+  const std::string& last(const char* action) const {
+    for (auto it = bodies.rbegin(); it != bodies.rend(); ++it)
+      if (it->find(std::string("\"action\":\"") + action + "\"") != std::string::npos) return *it;
+    static const std::string none;
+    return none;
+  }
+};
+
+}  // namespace
+
+TEST(AnkiHtml, MirrorsAnkiDoTextRendering) {
+  const std::string q =
+      "<style>.card { font: 12px; }</style><div class=\"front\">huis &amp; <b>tuin</b><br>\n"
+      "  <i>zin</i> [sound:a.mp3]<img src=\"pic.png\">&nbsp;<!-- c --> end</div>[anki:play:q:0]";
+  unsigned images = 0;
+  EXPECT_EQ(ankihtml::toMarkup(q, &images), "huis & **tuin**\n_zin_ [img:pic.png] end");
+  EXPECT_EQ(images, 1u);
+  // Cloze: question keeps Anki's [...] / [hint], answer side brackets the text.
+  EXPECT_EQ(ankihtml::toMarkup("De <span class=\"cloze\" data-ordinal=\"1\">[...]</span> is groot"),
+            "De [...] is groot");
+  EXPECT_EQ(
+      ankihtml::toMarkup("De <span class=\"cloze\"><b>hond</b></span> is <span class=\"cloze-inactive\">groot</span>"),
+      "De [**hond**] is groot");
+  // Blank-line runs squeeze to one; entities decode.
+  EXPECT_EQ(ankihtml::toMarkup("<p>a</p><p></p><p></p><p>b &#233; &#x263A;</p>"), "a\n\nb é ☺");
+  EXPECT_EQ(ankihtml::toMarkup("x < y &unknown; z"), "x < y &unknown; z");
+}
+
+TEST(AnkiHtml, AnswerPart) {
+  EXPECT_EQ(ankihtml::answerPart("front<hr id=answer>back"), "back");
+  EXPECT_EQ(ankihtml::answerPart("front<HR id=\"answer\" />back"), "back");
+  EXPECT_EQ(ankihtml::answerPart("<hr>no marker"), "<hr>no marker");
+}
+
+TEST(AnkiConnectClient, RequestBodyAndSearch) {
+  AnkiAccount a = connectAccount();
+  EXPECT_EQ(AnkiConnectClient::requestBody(a, "deckNames", ""), "{\"action\":\"deckNames\",\"version\":6}");
+  a.token = "s3cret";
+  EXPECT_EQ(AnkiConnectClient::requestBody(a, "findCards", "{\"query\":\"is:due\"}"),
+            "{\"action\":\"findCards\",\"version\":6,\"key\":\"s3cret\",\"params\":{\"query\":\"is:due\"}}");
+  a.decks = {"Dutch::Common", "A \"b\" c_d*"};
+  EXPECT_EQ(AnkiConnectClient::buildSearch(a, "is:new"),
+            "(\"deck:Dutch::Common\" OR \"deck:A \\\"b\\\" c\\_d\\*\") is:new");
+  a.decks.clear();
+  EXPECT_EQ(AnkiConnectClient::buildSearch(a, "is:new"), "is:new");
+}
+
+TEST(AnkiConnectClient, ExchangeAnswersCardsAndStreamsQueue) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, [] { return int64_t{1700000000}; });
+  const AnkiAccount a = connectAccount();
+  AnkiJournal journal(fs, ankipaths::reviewsFile(a.id));
+  journal.append({"dev-1", 111, 3, 0});
+  journal.append({"dev-2", 112, 1, 0});
+
+  http.responses["answerCards"] = "{\"result\":[true,false],\"error\":null}";
+  http.responses["deckNames"] = "{\"result\":[\"Default\",\"Dutch\",\"Dutch::Common\"],\"error\":null}";
+  http.responses["getDeckStats"] =
+      "{\"result\":{\"1\":{\"deck_id\":1,\"name\":\"Dutch::Common\",\"new_count\":1,\"learn_count\":0,"
+      "\"review_count\":2,\"total_in_deck\":9},\"2\":{\"name\":\"Dutch\",\"new_count\":3,\"learn_count\":0,"
+      "\"review_count\":2}},\"error\":null}";
+  http.responses["findCards"] = "{\"result\":[1001,1002,1003],\"error\":null}";
+  http.responses["cardsInfo"] =
+      "{\"result\":[{\"cardId\":1001,\"fields\":{\"Front\":{\"value\":\"x\",\"order\":0}},"
+      "\"question\":\"<style>.x{}</style>Q <b>one</b>\",\"answer\":\"Q <b>one</b><hr id=answer>A one\","
+      "\"deckName\":\"Dutch::Common\",\"queue\":2,\"type\":2},{\"cardId\":1002,\"question\":\"Q2\","
+      "\"answer\":\"A2\",\"deckName\":\"Dutch::Common\",\"queue\":0}],\"error\":null}";
+
+  const AnkiSyncEngine::Result r = engine.syncAccount(a, /*wantCards=*/true);
+  EXPECT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(r.reviewsSent, 2u);
+  EXPECT_EQ(r.reviewsAcked, 2u);
+  EXPECT_TRUE(journal.empty());
+  EXPECT_EQ(http.last("answerCards"),
+            "{\"action\":\"answerCards\",\"version\":6,\"params\":{\"answers\":[{\"cardId\":111,\"ease\":3},"
+            "{\"cardId\":112,\"ease\":1}]}}");
+  // learning, due, new: three searches, the new one capped by new_count (1).
+  EXPECT_EQ(http.count("findCards"), 3u);
+  EXPECT_NE(http.bodies[3].find("is:learn -is:suspended -is:buried"), std::string::npos);
+  EXPECT_NE(http.bodies[4].find("is:due -is:learn"), std::string::npos);
+  EXPECT_NE(http.bodies[5].find("is:new"), std::string::npos);
+  // 3 + 3 + 1 ids, 10 per request -> one cardsInfo call; deck list fetched once (not again by syncAccount).
+  EXPECT_EQ(http.count("cardsInfo"), 1u);
+  EXPECT_EQ(http.count("deckNames"), 1u);
+  EXPECT_EQ(r.cardsFetched, 2u);
+  EXPECT_EQ(r.counts.newCount, 1);
+  EXPECT_EQ(r.counts.due, 2);
+
+  AnkiCardCache cache(fs, ankipaths::cardsFile(a.id), ankipaths::cacheMetaFile(a.id));
+  ASSERT_EQ(cache.count(), 2u);
+  AnkiCard c;
+  ASSERT_TRUE(cache.load(0, c));
+  EXPECT_EQ(c.cardId, 1001);
+  EXPECT_EQ(c.q, "Q **one**");
+  EXPECT_EQ(c.a, "A one");
+  EXPECT_EQ(c.kind, "due");
+  EXPECT_EQ(c.deck, "Dutch::Common");
+  ASSERT_TRUE(cache.load(1, c));
+  EXPECT_EQ(c.kind, "new");
+  AnkiCardCache::Meta meta;
+  ASSERT_TRUE(cache.readMeta(meta));
+  EXPECT_EQ(meta.counts.returned, 2);
+  EXPECT_EQ(meta.fetchedAt, 1700000000);
+
+  const std::vector<AnkiDeck> decks = engine.loadDecks(a.id);
+  ASSERT_EQ(decks.size(), 3u);
+  EXPECT_EQ(decks[2].name, "Dutch::Common");
+  EXPECT_EQ(decks[2].due, 2);
+  EXPECT_EQ(decks[2].newCount, 1);
+}
+
+TEST(AnkiConnectClient, ErrorsKeepJournalAndFlagBadKey) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  const AnkiAccount a = connectAccount();
+  AnkiJournal journal(fs, ankipaths::reviewsFile(a.id));
+  journal.append({"dev-1", 111, 3, 0});
+
+  http.responses["answerCards"] = "{\"result\":null,\"error\":\"valid api key must be provided\"}";
+  AnkiSyncEngine::Result r = engine.exchange(a, false);
+  EXPECT_FALSE(r.ok);
+  EXPECT_TRUE(r.authFailed);
+  EXPECT_EQ(r.error, "valid api key must be provided");
+  EXPECT_EQ(journal.count(), 1u);
+
+  http.status = 500;
+  r = engine.exchange(a, false);
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.error, "HTTP 500");
+  EXPECT_EQ(journal.count(), 1u);
+}
+
+TEST(AnkiConnectClient, ProfileIsLoadedOncePerSession) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  AnkiAccount a = connectAccount();
+  a.profile = "Alice";
+  http.responses["loadProfile"] = "{\"result\":true,\"error\":null}";
+  http.responses["deckNames"] = "{\"result\":[\"Default\"],\"error\":null}";
+  http.responses["getDeckStats"] = "{\"result\":{},\"error\":null}";
+  EXPECT_TRUE(engine.fetchDecks(a).ok);
+  EXPECT_TRUE(engine.fetchDecks(a).ok);
+  EXPECT_EQ(http.count("loadProfile"), 1u);
+  EXPECT_EQ(http.bodies[0], "{\"action\":\"loadProfile\",\"version\":6,\"params\":{\"name\":\"Alice\"}}");
+
+  http.responses["loadProfile"] = "{\"result\":false,\"error\":null}";
+  a.profile = "Nobody";
+  const AnkiSyncEngine::Result r = engine.fetchDecks(a);
+  EXPECT_FALSE(r.ok);
+  EXPECT_EQ(r.error, "Profile not found: Nobody");
+}
+
+TEST(AnkiConnectClient, PushNotesUsesModelFieldsAndDropsDuplicates) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  const AnkiAccount a = connectAccount();
+  AnkiNoteQueue queue(fs, ankipaths::notesFile(a.id));
+  queue.append({"n1", "Dutch::Common", "Basic", "<b>huis</b>", "house", {"crosspoint", "book:X"}});
+  queue.append({"n2", "Dutch::Common", "Basic", "<b>huis</b>", "house", {}});
+  queue.append({"n3", "Missing", "Basic", "<b>boom</b>", "tree", {}});
+
+  http.responses["modelFieldNames"] = "{\"result\":[\"Vorderseite\",\"Rückseite\",\"Extra\"],\"error\":null}";
+  // One canned answer per addNote call, in order.
+  std::vector<std::string> addResults = {
+      "{\"result\":1496198395707,\"error\":null}",
+      "{\"result\":null,\"error\":\"cannot create note because it is a duplicate\"}",
+      "{\"result\":null,\"error\":\"deck was not found: Missing\"}",
+  };
+  size_t adds = 0;
+  struct Seq final : public AnkiHttp {
+    FakeConnect& inner;
+    std::vector<std::string>& results;
+    size_t& adds;
+    Seq(FakeConnect& i, std::vector<std::string>& r, size_t& n) : inner(i), results(r), adds(n) {}
+    int request(const char* m, const std::string& u, const std::vector<Header>& h, const std::string& body,
+                const DataCallback& onData) override {
+      if (body.find("\"action\":\"addNote\"") != std::string::npos) inner.responses["addNote"] = results[adds++];
+      return inner.request(m, u, h, body, onData);
+    }
+  } seq(http, addResults, adds);
+  AnkiSyncEngine engine2(fs, seq, nullptr);
+
+  const AnkiSyncEngine::Result r = engine2.pushNotes(a);
+  EXPECT_TRUE(r.ok);
+  EXPECT_EQ(r.notesSent, 3u);
+  EXPECT_EQ(r.notesAcked, 2u);  // added + duplicate; the missing deck stays queued
+  EXPECT_EQ(r.error, "deck was not found: Missing");
+  EXPECT_EQ(queue.count(), 1u);
+  EXPECT_EQ(queue.load()[0].clientId, "n3");
+  EXPECT_EQ(http.count("modelFieldNames"), 1u);  // cached per session
+  EXPECT_EQ(
+      http.bodies[1],
+      "{\"action\":\"addNote\",\"version\":6,\"params\":{\"note\":{\"deckName\":\"Dutch::Common\","
+      "\"modelName\":\"Basic\",\"fields\":{\"Vorderseite\":\"<b>huis</b>\",\"Rückseite\":\"house\"},"
+      "\"tags\":[\"crosspoint\",\"book:X\"],\"options\":{\"allowDuplicate\":false,\"duplicateScope\":\"deck\"}}}}");
+}
+
+TEST(AnkiConnectClient, NonReviewAccountOnlyPushes) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  const AnkiAccount a = connectAccount();
+  const AnkiSyncEngine::Result r = engine.exchange(a, false);
+  EXPECT_TRUE(r.ok);
+  EXPECT_TRUE(http.bodies.empty());
+}

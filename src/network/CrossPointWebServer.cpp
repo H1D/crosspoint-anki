@@ -1490,6 +1490,7 @@ void CrossPointWebServer::handleGetAnkiAccounts() const {
     doc["index"] = i;
     doc["id"] = a.id;
     doc["name"] = a.name;
+    doc["backend"] = a.isAnkiConnect() ? "ankiconnect" : "ankido";
     doc["url"] = a.url;
     doc["profile"] = a.profile;
     // Never expose tokens over the API — only indicate whether one is set
@@ -1567,6 +1568,10 @@ void CrossPointWebServer::handlePostAnkiAccount() {
   if (!readString("defaultDeck", account.lastDeck, MAX_DECK)) {
     server->send(400, "text/plain", "Deck name too long");
     return;
+  }
+  if (doc["backend"].is<const char*>()) {
+    account.backend =
+        strcmp(doc["backend"].as<const char*>(), "ankiconnect") == 0 ? AnkiBackend::AnkiConnect : AnkiBackend::AnkiDo;
   }
   if (doc["enabled"].is<bool>()) account.enabled = doc["enabled"].as<bool>();
   if (doc["decks"].is<JsonArrayConst>()) {

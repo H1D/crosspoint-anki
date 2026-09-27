@@ -24,6 +24,7 @@ void AnkiAccountStore::toJson(JsonDocument& doc) const {
     JsonObject obj = arr.add<JsonObject>();
     obj["id"] = a.id;
     obj["name"] = a.name;
+    obj["backend"] = a.isAnkiConnect() ? "ankiconnect" : "ankido";
     obj["url"] = a.url;
     obj["profile"] = a.profile;
     obj["token_obf"] = obfuscation::obfuscateToBase64(a.token);
@@ -55,6 +56,7 @@ bool AnkiAccountStore::fromJson(JsonVariantConst doc) {
     }
     if (a.id >= nextId) nextId = a.id + 1;
     a.name = obj["name"] | "";
+    a.backend = strcmp(obj["backend"] | "ankido", "ankiconnect") == 0 ? AnkiBackend::AnkiConnect : AnkiBackend::AnkiDo;
     a.url = trimSlash(obj["url"] | "");
     a.profile = obj["profile"] | "";
     a.enabled = obj["enabled"] | true;
