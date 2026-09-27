@@ -229,10 +229,13 @@ void AnkiAccountActivity::buildScreen(UiScreen& screen) {
                   static_cast<int16_t>(renderer.getScreenHeight() - (safe.y + safe.height) + metrics.buttonHintsHeight),
                   static_cast<int16_t>(safe.x)});
 
-  // Token hint where the old sub-header band sat.
-  const fui::Rect band = screen.takeTop(static_cast<int16_t>(metrics.tabBarHeight));
+  // Token hint where the old sub-header band sat. Two lines: the sentence
+  // does not fit one row on a 480 px panel in most languages.
+  fui::TextStyle hintStyle = screen.theme().smallText;
+  hintStyle.maxLines = 2;
+  const fui::Rect band = screen.takeTop(static_cast<int16_t>(metrics.tabBarHeight * 2));
   const int16_t pad = screen.theme().headerSidePadding;
-  screen.target().text(band.inset(fui::Insets{0, pad, 0, pad}), tr(STR_ANKI_WEB_HINT), screen.theme().smallText);
+  screen.target().text(band.inset(fui::Insets{0, pad, 0, pad}), tr(STR_ANKI_WEB_HINT), hintStyle);
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   // Labels/actionValue were set once in the constructor; only the live
