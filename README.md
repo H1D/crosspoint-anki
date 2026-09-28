@@ -10,8 +10,8 @@ Everything else is stock CrossPoint ([upstream README](https://github.com/crossp
 | | |
 |---|---|
 | ![](docs/anki/img/home.png) | **Anki on the home screen.** Pick an account if you have several. |
-| ![](docs/anki/img/card-front.png) ![](docs/anki/img/card-back.png) | **Review cards.** Confirm flips. Left = Again, Right = Good, side Down = Hard, side Up = Easy (or tap the strips). Anki does the scheduling. |
-| ![](docs/anki/img/word-select.png) ![](docs/anki/img/add-note.png) | **Add a word from a book.** Long-press a word (or reader menu → Add to Anki), confirm it, tick one or more accounts, tap **Deck** to pick each one's deck, **Add**. Front: word + sentence. Back: dictionary translation, if a dictionary is set up. |
+| ![](docs/anki/img/review.gif) | **Review cards.** Confirm flips. Left = Again, Right = Good, side Down = Hard, side Up = Easy (or tap the strips). Anki does the scheduling. |
+| ![](docs/anki/img/add-word.gif) | **Add a word from a book.** Long-press a word (or reader menu → Add to Anki), confirm it, tick one or more accounts, tap **Deck** to pick each one's deck, **Add**. Front: word + sentence. Back: dictionary translation, if a dictionary is set up. |
 | ![](docs/anki/img/settings.png) | **Offline first.** Cards are cached on the SD card; grades and new notes queue up and sync on demand, when you leave the review screen, or when the device goes to sleep. |
 
 ## Flash
