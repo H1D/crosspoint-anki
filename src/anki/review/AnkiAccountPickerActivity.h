@@ -5,8 +5,8 @@
 
 #include "activities/UiListActivity.h"
 
-// Asks which enabled account to review when more than one is enabled. One row
-// per enabled account plus a trailing hint row; selecting a row stores it as
+// Asks which enabled account to review when more than one is enabled. A hint
+// band, then one row per enabled account; selecting a row stores it as
 // the review account and returns MenuResult{store index}. Back cancels.
 class AnkiAccountPickerActivity final : public UiListActivity {
  public:
@@ -16,8 +16,7 @@ class AnkiAccountPickerActivity final : public UiListActivity {
   void onEnter() override;
 
  private:
-  // Selectable rows only; the hint row is drawn but never reachable.
-  int listCount() const override { return static_cast<int>(rowItems_.size()) - 1; }
+  int listCount() const override { return static_cast<int>(rowItems_.size()); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
   void onBackButton() override;

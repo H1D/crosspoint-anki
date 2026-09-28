@@ -20,7 +20,7 @@ void AnkiAccountPickerActivity::rebuildRowItems() {
   subtitles_.clear();
 
   const auto& accounts = ANKI_STORE.getAccounts();
-  rowItems_.reserve(accounts.size() + 1);
+  rowItems_.reserve(accounts.size());
   subtitles_.reserve(accounts.size());
   const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
   for (size_t i = 0; i < accounts.size(); i++) {
@@ -37,12 +37,6 @@ void AnkiAccountPickerActivity::rebuildRowItems() {
     item.actionValue = static_cast<int16_t>(i);  // store index, not row index
     rowItems_.push_back(item);
   }
-
-  fui::ListItem hint;
-  hint.label = tr(STR_ANKI_PICKER_HINT);
-  hint.isHeader = true;
-  hint.enabled = false;
-  rowItems_.push_back(hint);
 }
 
 const char* AnkiAccountPickerActivity::headerTitle() const { return tr(STR_ANKI_PICK_ACCOUNT); }
@@ -71,6 +65,13 @@ void AnkiAccountPickerActivity::buildScreen(UiScreen& screen) {
                   static_cast<int16_t>(renderer.getScreenWidth() - (safe.x + safe.width)),
                   static_cast<int16_t>(renderer.getScreenHeight() - (safe.y + safe.height) + metrics.buttonHintsHeight),
                   static_cast<int16_t>(safe.x)});
+
+  // Two lines, like the account editor's hint: one row truncates in most languages.
+  fui::TextStyle hintStyle = screen.theme().smallText;
+  hintStyle.maxLines = 2;
+  const fui::Rect band = screen.takeTop(static_cast<int16_t>(metrics.tabBarHeight * 2));
+  const int16_t pad = screen.theme().headerSidePadding;
+  screen.target().text(band.inset(fui::Insets{0, pad, 0, pad}), tr(STR_ANKI_PICKER_HINT), hintStyle);
   screen.spacer(static_cast<int16_t>(metrics.verticalSpacing));
 
   fui::ListProps props;

@@ -285,10 +285,26 @@ void DictionaryWordSelectActivity::performAnkiAdd() {
   // tokens (~2KB of copies), freed before the modal opens.
   std::string sentence;
   {
+    // Stay inside the word's paragraph: a row gap wider than the page's
+    // normal line pitch marks a heading or paragraph break.
+    int minPitch = INT16_MAX;
+    for (size_t i = 1; i < words.size(); i++) {
+      const int gap = words[i].y - words[i - 1].y;
+      if (words[i].row != words[i - 1].row && gap > 0) minPitch = std::min(minPitch, gap);
+    }
+    const auto breakBefore = [&](const size_t i) {
+      if (words[i].row == words[i - 1].row || minPitch == INT16_MAX) return false;
+      return (words[i].y - words[i - 1].y) * 4 > minPitch * 5;
+    };
+    size_t first = static_cast<size_t>(selected);
+    while (first > 0 && !breakBefore(first)) first--;
+    size_t last = static_cast<size_t>(selected);
+    while (last + 1 < words.size() && !breakBefore(last + 1)) last++;
+
     std::vector<std::string> tokens;
-    tokens.reserve(words.size());
-    for (const auto& box : words) tokens.emplace_back(box.text);
-    sentence = ankinote::sentenceAround(tokens, static_cast<size_t>(selected));
+    tokens.reserve(last - first + 1);
+    for (size_t i = first; i <= last; i++) tokens.emplace_back(words[i].text);
+    sentence = ankinote::sentenceAround(tokens, static_cast<size_t>(selected) - first);
   }
 
   // Translation is best effort: a configured dictionary that misses, fails or

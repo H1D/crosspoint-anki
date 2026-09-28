@@ -561,7 +561,14 @@ void AnkiReviewActivity::render(RenderLock&&) {
     const char* message = mode == Mode::NoAccount ? tr(STR_ANKI_NO_REVIEW_ACCOUNT)
                           : cacheCount > 0        ? tr(STR_ANKI_ALL_DONE)
                                                   : tr(STR_ANKI_NO_CARDS);
-    renderer.drawCenteredText(UI_10_FONT_ID, (pageHeight - renderer.getLineHeight(UI_10_FONT_ID)) / 2, message);
+    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
+    const std::vector<std::string> lines =
+        renderer.wrappedText(UI_10_FONT_ID, message, contentWidth - 2 * metrics.contentSidePadding, 4);
+    int y = (pageHeight - lineHeight * static_cast<int>(lines.size())) / 2;
+    for (const std::string& line : lines) {
+      renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
+      y += lineHeight;
+    }
   } else {
     drawHeader(contentX, contentWidth, contentY + metrics.topPadding + 10);
     // Two-pass draw inside a prewarm scope so SD-card font glyphs load in one

@@ -27,6 +27,8 @@ namespace {
 
 constexpr unsigned long POPUP_DURATION_MS = 1200;
 constexpr const char* DEFAULT_DECK = "Default";
+// Bytes of sentence kept before the word in the band; about one line.
+constexpr size_t SENTENCE_LEAD = 40;
 
 // Accounts checked on the last add, kept across modals (ids, so store edits
 // in between cannot re-target them). Empty until the first open.
@@ -56,6 +58,13 @@ void AnkiAddNoteActivity::onEnter() {
   ActivityResult cancelled;
   cancelled.isCancelled = true;
   setResult(std::move(cancelled));
+  sentenceShown = sentence;
+  const size_t at = sentence.find(noteWord);
+  if (at != std::string::npos && at > SENTENCE_LEAD) {
+    // Start at a word boundary so no UTF-8 sequence is split.
+    const size_t cut = sentence.find(' ', at - SENTENCE_LEAD);
+    if (cut != std::string::npos && cut < at) sentenceShown = "\xE2\x80\xA6" + sentence.substr(cut + 1);
+  }
   ANKI_STORE.loadFromFile();
   buildTargets();
   refreshRows();
@@ -284,6 +293,7 @@ void AnkiAddNoteActivity::queueNotes() {
   AnkiStorageFs& fs = AnkiStorageFs::instance();
   const auto& accounts = ANKI_STORE.getAccounts();
   size_t pending = 0;
+  size_t queued = 0;
   size_t failed = 0;
   for (const Target& t : targets) {
     if (!t.checked || t.storeIndex >= accounts.size()) continue;
@@ -299,7 +309,8 @@ void AnkiAddNoteActivity::queueNotes() {
     note.back = translation;
     note.tags = tags;
     if (queue.append(note)) {
-      pending += queue.count();
+      pending = queue.count();
+      queued++;
     } else {
       LOG_ERR("ANKI", "Failed to queue note for account %u", static_cast<unsigned>(t.id));
       failed++;
@@ -307,7 +318,12 @@ void AnkiAddNoteActivity::queueNotes() {
   }
 
   if (failed == 0) {
-    snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED), static_cast<int>(pending));
+    // One account: its pending count; several: how many accounts got the note.
+    if (queued > 1) {
+      snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED_ACCOUNTS), static_cast<int>(queued));
+    } else {
+      snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED), static_cast<int>(pending));
+    }
     popup = Popup::Queued;
   } else {
     snprintf(popupText, sizeof(popupText), "%s", tr(STR_ANKI_QUEUE_FAILED));
@@ -349,7 +365,7 @@ void AnkiAddNoteActivity::buildScreen(UiScreen& screen) {
   const fui::Insets sideInset{0, theme.listSidePadding, 0, theme.listSidePadding};
   screen.target().text(screen.takeTop(bodyLine, theme.spaceXs).inset(sideInset), noteWord.c_str(), wordStyle);
   screen.target().text(screen.takeTop(static_cast<int16_t>(bodyLine * 2), theme.spaceXs).inset(sideInset),
-                       sentence.c_str(), sentenceStyle);
+                       sentenceShown.c_str(), sentenceStyle);
   screen.target().text(screen.takeTop(static_cast<int16_t>(smallLine * 2), theme.spaceMd).inset(sideInset),
                        translation.empty() ? tr(STR_ANKI_NO_TRANSLATION) : translation.c_str(), translationStyle);
 

@@ -64,6 +64,8 @@ class AnkiAddNoteActivity final : public UiListActivity {
   const std::string sentence;
   const std::string translation;
   const std::string bookTitle;
+  // `sentence` as shown in the two-line band: cut in front so the word stays visible.
+  std::string sentenceShown;
 
   std::vector<Target> targets;
   // Two rows per target (checkbox, deck) + the Add row.
