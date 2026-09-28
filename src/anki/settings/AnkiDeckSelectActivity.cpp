@@ -28,6 +28,14 @@ AnkiDeckSelectActivity::AnkiDeckSelectActivity(GfxRenderer& renderer, MappedInpu
                                                const int accountIndex, const Mode mode)
     : UiListActivity("AnkiDeckSelect", renderer, mappedInput), accountIndex(accountIndex), mode(mode) {}
 
+AnkiDeckSelectActivity::AnkiDeckSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
+                                               std::vector<std::string> choices, std::string current)
+    : UiListActivity("AnkiDeckSelect", renderer, mappedInput),
+      accountIndex(-1),
+      mode(Mode::Pick),
+      choices_(std::move(choices)),
+      current_(std::move(current)) {}
+
 bool AnkiDeckSelectActivity::hasCachedDecks(const uint32_t accountId) { return !cachedDecks(accountId).empty(); }
 
 void AnkiDeckSelectActivity::onEnter() {
@@ -37,6 +45,20 @@ void AnkiDeckSelectActivity::onEnter() {
   names_.clear();
   selected_.clear();
   rowItems_.clear();
+
+  if (mode == Mode::Pick) {
+    names_ = choices_;
+    rowItems_.reserve(names_.size());
+    for (size_t i = 0; i < names_.size(); i++) {
+      fui::ListItem item;
+      item.label = names_[i].c_str();
+      item.actionValue = static_cast<int16_t>(i);
+      rowItems_.push_back(item);
+    }
+    const auto it = std::find(names_.begin(), names_.end(), current_);
+    if (it != names_.end()) nav.selected = static_cast<int>(it - names_.begin());
+    return;
+  }
 
   const AnkiAccount* account = accountIndex < 0 ? nullptr : ANKI_STORE.getAccount(static_cast<size_t>(accountIndex));
   if (!account) {
@@ -95,6 +117,7 @@ void AnkiDeckSelectActivity::refreshChecks() {
 }
 
 const char* AnkiDeckSelectActivity::headerTitle() const {
+  if (mode == Mode::Pick) return tr(STR_ANKI_DECK);
   return mode == Mode::Multi ? tr(STR_ANKI_DECKS) : tr(STR_ANKI_DEFAULT_DECK);
 }
 
@@ -109,6 +132,10 @@ void AnkiDeckSelectActivity::activateIndex(const int index) {
   nav.selected = index;
   if (index < 0 || index >= static_cast<int>(rowItems_.size())) return;
 
+  if (mode == Mode::Pick) {
+    returnSingle(names_[static_cast<size_t>(index)]);
+    return;
+  }
   if (mode == Mode::Single) {
     returnSingle(index == 0 ? std::string() : names_[static_cast<size_t>(index - 1)]);
     return;
@@ -131,7 +158,7 @@ void AnkiDeckSelectActivity::activateIndex(const int index) {
 }
 
 void AnkiDeckSelectActivity::onBackButton() {
-  if (mode == Mode::Single) {
+  if (mode != Mode::Multi) {
     ActivityResult cancelled;
     cancelled.isCancelled = true;
     setResult(std::move(cancelled));

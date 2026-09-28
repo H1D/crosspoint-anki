@@ -6,6 +6,7 @@
 #include <GfxRenderer.h>
 #include <I18n.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -15,7 +16,10 @@
 #include "AnkiSecureHttp.h"
 #include "AnkiStorageFs.h"
 #include "MappedInputManager.h"
+#include "activities/ActivityResult.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "components/UITheme.h"
+#include "settings/AnkiDeckSelectActivity.h"
 
 namespace fui = freeink::ui;
 
@@ -48,6 +52,10 @@ void AnkiAddNoteActivity::onEnter() {
   UiListActivity::onEnter();
   nav.selected = 0;
   popup = Popup::None;
+  // Every exit but a successful Add reports cancelled (the caller stays open).
+  ActivityResult cancelled;
+  cancelled.isCancelled = true;
+  setResult(std::move(cancelled));
   ANKI_STORE.loadFromFile();
   buildTargets();
   refreshRows();
@@ -120,20 +128,25 @@ bool AnkiAddNoteActivity::anyChecked() const {
 void AnkiAddNoteActivity::refreshRows() {
   rowItems.clear();
   if (targets.empty()) return;
-  rowItems.reserve(targets.size() + 1);
+  rowItems.reserve(targets.size() * 2 + 1);
   for (size_t i = 0; i < targets.size(); i++) {
     const Target& t = targets[i];
-    fui::ListItem item;
-    item.label = t.label.c_str();
-    item.subtitle = t.decks[static_cast<size_t>(t.deckPos)].c_str();
-    item.toggle = true;
-    item.toggleChecked = t.checked;
-    item.actionValue = static_cast<int16_t>(i);
-    rowItems.push_back(item);
+    fui::ListItem account;
+    account.label = t.label.c_str();
+    account.toggle = true;
+    account.toggleChecked = t.checked;
+    account.actionValue = static_cast<int16_t>(i * 2);
+    rowItems.push_back(account);
+    fui::ListItem deck;
+    deck.label = tr(STR_ANKI_DECK);
+    deck.value = t.decks[static_cast<size_t>(t.deckPos)].c_str();
+    deck.actionValue = static_cast<int16_t>(i * 2 + 1);
+    rowItems.push_back(deck);
   }
   fui::ListItem add;
   add.label = tr(STR_ANKI_ADD);
-  add.actionValue = static_cast<int16_t>(targets.size());
+  add.enabled = anyChecked();
+  add.actionValue = static_cast<int16_t>(targets.size() * 2);
   rowItems.push_back(add);
 }
 
@@ -145,14 +158,14 @@ void AnkiAddNoteActivity::drawFooter() {
     GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
     return;
   }
-  // Front Left/Right cycle the highlighted row's deck; the side buttons move the selection.
+  // Front Left/Right cycle the highlighted account's deck; the side buttons move the selection.
   const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_ANKI_DECK), tr(STR_ANKI_DECK));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void AnkiAddNoteActivity::cycleDeck(const int direction) {
-  const int index = nav.selected;
-  if (index < 0 || index >= static_cast<int>(targets.size())) return;
+  const int index = nav.selected / 2;
+  if (nav.selected < 0 || index >= static_cast<int>(targets.size())) return;
   Target& t = targets[static_cast<size_t>(index)];
   const int count = static_cast<int>(t.decks.size());
   if (count < 2) return;
@@ -165,6 +178,7 @@ bool AnkiAddNoteActivity::handleCustomInput() {
   if (popup != Popup::None) {
     if (millis() - popupTime >= POPUP_DURATION_MS) {
       if (popup == Popup::Queued) {
+        setResult(ActivityResult{});
         finish();
         return true;
       }
@@ -191,15 +205,67 @@ bool AnkiAddNoteActivity::handleCustomInput() {
 void AnkiAddNoteActivity::activateIndex(const int index) {
   nav.selected = index;
   if (index < 0 || index >= static_cast<int>(rowItems.size())) return;
-  if (index < static_cast<int>(targets.size())) {
-    Target& t = targets[static_cast<size_t>(index)];
-    t.checked = !t.checked;
-    setChecked(t.id, t.checked);
-    refreshRows();
-    requestUpdate();
+  const size_t targetIndex = static_cast<size_t>(index / 2);
+  if (targetIndex >= targets.size()) {
+    queueNotes();
     return;
   }
-  queueNotes();
+  Target& t = targets[targetIndex];
+  if (index % 2 == 1) {
+    // Choosing a deck implies adding to that account.
+    if (!t.checked) {
+      t.checked = true;
+      setChecked(t.id, true);
+      refreshRows();
+    }
+    openDeckPicker(targetIndex);
+    return;
+  }
+  t.checked = !t.checked;
+  setChecked(t.id, t.checked);
+  refreshRows();
+  requestUpdate();
+}
+
+// The account's synced deck list; before any sync, type the name instead.
+void AnkiAddNoteActivity::openDeckPicker(const size_t targetIndex) {
+  const Target& t = targets[targetIndex];
+  const std::string& current = t.decks[static_cast<size_t>(t.deckPos)];
+  auto onResult = [this, targetIndex](const ActivityResult& result) {
+    if (result.isCancelled || !std::holds_alternative<KeyboardResult>(result.data)) return;
+    setDeck(targetIndex, std::get<KeyboardResult>(result.data).text);
+  };
+  app.clearTapFlash();
+  if (!AnkiDeckSelectActivity::hasCachedDecks(t.id)) {
+    auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ANKI_DECK), current, 100,
+                                                             InputType::Text);
+    if (!keyboard) {
+      LOG_ERR("ANKI", "OOM: keyboard");
+      return;
+    }
+    startActivityForResult(std::move(keyboard), onResult);
+    return;
+  }
+  auto picker = makeUniqueNoThrow<AnkiDeckSelectActivity>(renderer, mappedInput, t.decks, current);
+  if (!picker) {
+    LOG_ERR("ANKI", "OOM: deck picker");
+    return;
+  }
+  startActivityForResult(std::move(picker), onResult);
+}
+
+void AnkiAddNoteActivity::setDeck(const size_t targetIndex, const std::string& deck) {
+  if (targetIndex >= targets.size() || deck.empty()) return;
+  Target& t = targets[targetIndex];
+  const auto it = std::find(t.decks.begin(), t.decks.end(), deck);
+  if (it != t.decks.end()) {
+    t.deckPos = static_cast<int>(it - t.decks.begin());
+  } else {
+    t.decks.push_back(deck);
+    t.deckPos = static_cast<int>(t.decks.size()) - 1;
+  }
+  refreshRows();  // row pointers may point into the old deck storage
+  requestUpdate();
 }
 
 // One note per checked account, each with its own client id and that row's

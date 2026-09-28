@@ -318,7 +318,14 @@ void DictionaryWordSelectActivity::performAnkiAdd() {
   }
   // The modal repaints the whole screen; the returning render must be full.
   snapshotIdx = -1;
-  startActivityForResult(std::move(modal), [this](const ActivityResult&) { requestUpdate(); });
+  // A queued note ends the word pick too; Back returns here to pick another word.
+  startActivityForResult(std::move(modal), [this](const ActivityResult& result) {
+    if (!result.isCancelled) {
+      finish();
+      return;
+    }
+    requestUpdate();
+  });
 }
 
 void DictionaryWordSelectActivity::loop() {

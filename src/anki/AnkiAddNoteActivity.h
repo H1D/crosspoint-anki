@@ -11,10 +11,11 @@
 
 // "Add to Anki" checklist over the reader's word-select screen. A band above
 // the list shows the picked word, its sentence and the dictionary translation
-// (if any); below it one toggle row per enabled account (subtitle = the deck
-// this add will use; Left/Right cycle it for the highlighted row, never
-// persisted) and a final "Add" row that queues one note per checked account
-// (notes.jsonl) for the next sync. The checked set is remembered across adds.
+// (if any); below it, per enabled account, a checkbox row and a "Deck" row
+// that opens the deck list (Left/Right also cycle it; never persisted), then
+// an "Add" row that queues one note per checked account (notes.jsonl) for
+// the next sync. The checked set is remembered across adds. The result is
+// cancelled unless notes were queued.
 class AnkiAddNoteActivity final : public UiListActivity {
  public:
   // `noteWord`, not `word`: Arduino.h defines word(...) as a macro.
@@ -32,8 +33,8 @@ class AnkiAddNoteActivity final : public UiListActivity {
  private:
   enum class Popup : uint8_t { None, Queued, Failed };
 
-  // One enabled account. ListItem label/subtitle point into `label` and
-  // `decks`, so `targets` is built once in onEnter() and never resized.
+  // One enabled account. ListItem label/value point into `label` and
+  // `decks`, so rows are rebuilt (refreshRows) whenever either changes.
   struct Target {
     size_t storeIndex;
     uint32_t id;
@@ -54,6 +55,8 @@ class AnkiAddNoteActivity final : public UiListActivity {
   static std::vector<std::string> deckChoices(const AnkiAccount& account);
   void refreshRows();
   void cycleDeck(int direction);
+  void openDeckPicker(size_t targetIndex);
+  void setDeck(size_t targetIndex, const std::string& deck);
   void queueNotes();
   bool anyChecked() const;
 
@@ -63,7 +66,8 @@ class AnkiAddNoteActivity final : public UiListActivity {
   const std::string bookTitle;
 
   std::vector<Target> targets;
-  std::vector<freeink::ui::ListItem> rowItems;  // targets + the Add row
+  // Two rows per target (checkbox, deck) + the Add row.
+  std::vector<freeink::ui::ListItem> rowItems;
 
   Popup popup = Popup::None;
   unsigned long popupTime = 0;

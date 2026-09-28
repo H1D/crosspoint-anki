@@ -250,3 +250,13 @@ whole afterwards.
   account with its own client id. The checked set is remembered between adds
   (first time: the last reviewed account). Tap works everywhere, so touch-only
   boards no longer depend on a physical Confirm.
+
+## Add-word screen (2026-09-28)
+
+- Per enabled account: a checkbox row and a **Deck** row. Deck opens the
+  account's synced deck list (or the keyboard before its first sync);
+  tapping Deck on an unticked account ticks it. Left/Right still cycle the
+  highlighted account's deck. The choice is for this add only; the
+  persistent default is the account's "Deck for new words".
+- A successful Add closes word selection too and returns to the page; Back
+  from the add screen returns to word selection to pick another word.
