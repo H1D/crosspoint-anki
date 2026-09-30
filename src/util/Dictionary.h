@@ -11,6 +11,13 @@ struct DictLocation {
   uint32_t offset = 0;  // byte offset in .dict data
   uint32_t size = 0;    // byte length in .dict data
   bool found = false;
+  // Further entries read after the first and appended to the definition:
+  // the same headword's other .idx entries (one per part of speech in
+  // WikDict), or the word's own entries behind an irregular verb's lemma.
+  static constexpr uint8_t MAX_EXTRA = 5;
+  uint8_t extraCount = 0;
+  uint32_t extraOffset[MAX_EXTRA] = {};
+  uint32_t extraSize[MAX_EXTRA] = {};
   // Set when the search was cut short by an .idx open or seek failure rather than
   // reaching a verdict, so a failed search isn't reported as a genuine miss.
   bool readError = false;
@@ -56,6 +63,10 @@ class Dictionary {
   // the viewer may lay them out through the EPUB rendering pipeline.
   bool definitionsAreHtml() const { return htmlDefinitions; }
 
+  // Source language of the headwords ("en", "nl"), "" when unknown; see
+  // DictLanguage::sourceOf. Picks the stemming rules.
+  const std::string& language() const { return sourceLanguage; }
+
   bool needsIndex();
 
   // Why an index build failed — the scan buffer is a heap allocation, so the
@@ -76,9 +87,10 @@ class Dictionary {
   bool buildIndex(void (*yieldFn)(void*) = nullptr, void* ctx = nullptr, IndexResult* outResult = nullptr);
 
   // Clean the word, look it up, and on a miss retry dictionary-authored
-  // synonyms then mini stem variants (-'s/-s/-es/-ies/-ed/-ing). On a hit fills
-  // the definition text (capped at MAX_DEFINITION_BYTES) and the headword as
-  // stored in the index. Returns true on a hit. *outResult (if provided)
+  // synonyms then stem variants for the dictionary's language (DictStemmer);
+  // Dutch irregular verb forms go to their infinitive before the exact match.
+  // On a hit fills the definition text (every entry of the headword, capped at
+  // MAX_DEFINITION_BYTES) and the headword as stored in the index. Returns true on a hit. *outResult (if provided)
   // reports the precise outcome so the UI can distinguish a genuine miss from a
   // decompression / low-memory / read failure.
   bool lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
@@ -105,13 +117,13 @@ class Dictionary {
   // Compose "<basePath><suffix>" into a caller-supplied stack buffer. The
   // lookup path runs this instead of `basePath + suffix` so path construction
   // costs no transient heap — see LookupSession. (A lookup still allocates
-  // elsewhere: cleanWord(), stemVariants() and the matched headword.) False
+  // elsewhere: cleanWord(), the stem variants and the matched headword.) False
   // (and logs) when the path would not fit, which open() has already ruled out.
   bool buildPath(char* buf, size_t bufSize, const char* suffix) const;
 
   // The .idx / .qidx handles shared by every locate() call in one lookup. A
-  // lookup probes up to ~5 stem variants; opening the two files per probe cost
-  // ~10 SD opens and ~10 std::string path temporaries per word, churning the
+  // lookup probes several stem variants (a few dozen for Dutch); opening the
+  // two files per probe cost two SD opens and path temporaries each, churning the
   // same heap whose fragmentation makes lookups fail mid-session. Opened once
   // per lookup instead, with the paths built via buildPath(). The .syn / .sidx
   // handles are opened lazily by locateSynonym() — only an exact miss consults
@@ -145,8 +157,9 @@ class Dictionary {
   bool openSynonyms(LookupSession& session);
 
   // Bisect a sampled-offset sidecar (.qidx over .idx, .sidx over .syn) to the
-  // byte offset of the last sampled entry whose word is <= target, so the caller
-  // only has to linear-scan at most SAMPLE_INTERVAL entries from there. Returns
+  // byte offset of the last sampled entry whose word is < target, so the caller
+  // only has to linear-scan about SAMPLE_INTERVAL entries from there and meets
+  // a run of entries equal to target at its first one. Returns
   // 0 — scan source from the start — when sampleCount is 0 or a sample is
   // unreadable. Clobbers wordBuf.
   uint32_t bisectSamples(HalFile& sidecar, HalFile& source, uint32_t sampleCount, const char* target);
@@ -176,7 +189,12 @@ class Dictionary {
   // Read the definition at location. On failure returns false and, if outResult
   // is given, sets it to the specific reason (Decompress / LowMemory / ReadError).
   bool readDefinition(const DictLocation& location, std::string& out, LookupResult* outResult = nullptr);
-  static void stemVariants(const std::string& word, std::vector<std::string>& out);
+  // Appends the location's extra entries to `out` (best effort: an entry that
+  // fails to read, or would not fit in the heap, is skipped).
+  void appendExtraDefinitions(const DictLocation& location, std::string& out);
+  // Adds `more` (its first entry and extras) to `location`'s extras while
+  // there is room.
+  static void addExtras(DictLocation& location, const DictLocation& more);
 
   // Read a null-terminated word from an open file into buf (max bufSize-1
   // chars). Returns the number of characters read (excluding null), or -1 on
@@ -187,6 +205,7 @@ class Dictionary {
   bool hasPlainDict = false;
   bool hasSyn = false;  // a <stem>.syn synonym index exists next to the .idx
   bool htmlDefinitions = false;
+  std::string sourceLanguage;
 
   // Shared scan buffer: lookups are single-threaded and this avoids a
   // 256-byte array on the stack of every locate() call.

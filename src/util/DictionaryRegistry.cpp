@@ -2,10 +2,12 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstring>
 
+#include "DictLanguage.h"
 #include "StringUtils.h"
 
 namespace DictionaryRegistry {
@@ -55,6 +57,13 @@ bool findStem(const char* folderPath, std::string& stemOut) {
 
   stemOut = foundStem;
   return true;
+}
+
+// Source language of a dictionary folder (see DictLanguage::sourceOf).
+std::string languageOf(const char* folderName) {
+  std::string base;
+  if (!resolveBasePath(folderName, base)) return "";
+  return DictLanguage::sourceOf(readIfo(base), folderName);
 }
 
 }  // namespace
@@ -108,6 +117,35 @@ bool resolveBasePath(const char* folderName, std::string& basePathOut) {
     return true;
   }
   return false;
+}
+
+std::string readIfo(const std::string& basePath) {
+  constexpr size_t IFO_BYTES = 2048;
+  HalFile ifo;
+  if (!Storage.openFileForRead("DREG", basePath + ".ifo", ifo)) return "";
+  auto buf = makeUniqueNoThrow<char[]>(IFO_BYTES);
+  if (!buf) {
+    LOG_ERR("DREG", "OOM: .ifo buffer");
+    return "";
+  }
+  const int n = ifo.read(buf.get(), IFO_BYTES);
+  return n > 0 ? std::string(buf.get(), static_cast<size_t>(n)) : std::string();
+}
+
+std::string pickForBook(const std::string& bookLanguage, const char* selected) {
+  if (!selected || selected[0] == '\0') return "";
+  const std::string lang = DictLanguage::primary(bookLanguage);
+  if (lang.empty() || languageOf(selected) == lang) return selected;
+
+  std::vector<DictionaryEntry> all;
+  discover(all);
+  for (const DictionaryEntry& entry : all) {
+    if (entry.name != selected && languageOf(entry.name.c_str()) == lang) {
+      LOG_DBG("DREG", "Book language %s: using %s instead of %s", lang.c_str(), entry.name.c_str(), selected);
+      return entry.name;
+    }
+  }
+  return selected;
 }
 
 }  // namespace DictionaryRegistry

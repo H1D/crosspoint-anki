@@ -46,6 +46,7 @@
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
+#include "util/DictionaryRegistry.h"
 #include "util/ScreenshotUtil.h"
 
 namespace {
@@ -314,7 +315,17 @@ void EpubReaderActivity::showBuildPopup(GfxRenderer& renderer, int& pagesUntilFu
   buildPopupPending = false;
 }
 
-void EpubReaderActivity::openDictionaryWordSelect() {
+const std::string& EpubReaderActivity::dictionaryForBook() {
+  if (!bookDictionaryPicked || bookDictionaryFor != SETTINGS.dictionaryName) {
+    bookDictionaryFor = SETTINGS.dictionaryName;
+    bookDictionary =
+        DictionaryRegistry::pickForBook(epub ? epub->getLanguage() : std::string{}, SETTINGS.dictionaryName);
+    bookDictionaryPicked = true;
+  }
+  return bookDictionary;
+}
+
+void EpubReaderActivity::openDictionaryWordSelect(const int touchX, const int touchY) {
   if (SETTINGS.dictionaryName[0] == '\0') {
     showDictionaryMessage = true;
     dictionaryMessageTime = millis();
@@ -331,9 +342,14 @@ void EpubReaderActivity::openDictionaryWordSelect() {
   orientedMarginTop += SETTINGS.screenMargin;
   orientedMarginLeft += SETTINGS.screenMargin;
 
-  startActivityForResult(std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page),
-                                                                        orientedMarginLeft, orientedMarginTop),
-                         [this](const ActivityResult&) { requestUpdate(); });
+  auto activity = makeUniqueNoThrow<DictionaryWordSelectActivity>(
+      renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop, dictionaryForBook(),
+      DictionaryWordSelectActivity::Mode::Lookup, std::string{}, touchX, touchY);
+  if (!activity) {
+    LOG_ERR("ERS", "OOM: DictionaryWordSelectActivity");
+    return;
+  }
+  startActivityForResult(std::move(activity), [this](const ActivityResult&) { requestUpdate(); });
 }
 
 void EpubReaderActivity::openAnkiWordSelect(const int touchX, const int touchY) {
@@ -348,7 +364,7 @@ void EpubReaderActivity::openAnkiWordSelect(const int touchX, const int touchY) 
   orientedMarginLeft += SETTINGS.screenMargin;
 
   auto activity = makeUniqueNoThrow<DictionaryWordSelectActivity>(
-      renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop,
+      renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop, dictionaryForBook(),
       DictionaryWordSelectActivity::Mode::AnkiAdd, epub->getTitle(), touchX, touchY);
   if (!activity) {
     LOG_ERR("ERS", "OOM: DictionaryWordSelectActivity");
@@ -623,15 +639,22 @@ void EpubReaderActivity::loop() {
     }
   }
 
-  // Touch long-press on a word opens the Anki picker on it. wasScreenLongPress
-  // fires once and suppresses the rest of the contact, so the lift is not also
-  // a tap; it is only polled when the picker can actually open.
-  if (!atEndOfBook && !endOfBookMenuOpen && section && mappedInput.hasTouch() && ANKI_STORE.hasEnabledAccounts()) {
+  // Touch long-press on a word opens the Anki picker on it, or the dictionary
+  // picker when no Anki account is enabled. wasScreenLongPress fires once and
+  // suppresses the rest of the contact, so the lift is not also a tap; it is
+  // only polled when a picker can actually open.
+  const bool ankiOnLongPress = ANKI_STORE.hasEnabledAccounts();
+  if (!atEndOfBook && !endOfBookMenuOpen && section && mappedInput.hasTouch() &&
+      (ankiOnLongPress || SETTINGS.dictionaryName[0] != '\0')) {
     int touchX = 0;
     int touchY = 0;
     if (mappedInput.wasScreenLongPress(touchX, touchY)) {
       pendingManualTurn = 0;
-      openAnkiWordSelect(touchX, touchY);
+      if (ankiOnLongPress) {
+        openAnkiWordSelect(touchX, touchY);
+      } else {
+        openDictionaryWordSelect(touchX, touchY);
+      }
       return;
     }
   }

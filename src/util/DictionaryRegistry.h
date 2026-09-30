@@ -22,4 +22,15 @@ void discover(std::vector<DictionaryEntry>& out);
 // Returns false if the folder holds no usable dictionary in either root.
 bool resolveBasePath(const char* folderName, std::string& basePathOut);
 
+// Head of "<basePath>.ifo" (the first 2KB, which holds every key the reader
+// uses), "" when it is missing or unreadable.
+std::string readIfo(const std::string& basePath);
+
+// Dictionary folder for a book whose EPUB language is `bookLanguage`:
+// `selected` (the Settings choice) when it matches the book's language, the
+// book has none, or no other dictionary matches; otherwise the first
+// dictionary (by name) whose source language matches. "" when `selected` is
+// empty: "None" turns lookups off for every book.
+std::string pickForBook(const std::string& bookLanguage, const char* selected);
+
 }  // namespace DictionaryRegistry

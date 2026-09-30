@@ -17,20 +17,22 @@
 //
 // Mode::Lookup opens DictionaryDefinitionActivity for the word. Mode::AnkiAdd
 // builds the sentence around the word from the page, looks up a translation
-// when a dictionary is configured (none required), and opens
-// AnkiAddNoteActivity to queue the note.
+// when a dictionary is given (none required), and opens AnkiAddNoteActivity
+// to queue the note. `dictionaryName` is the folder picked for the book
+// (DictionaryRegistry::pickForBook), "" for none.
 class DictionaryWordSelectActivity final : public Activity {
  public:
   enum class Mode : uint8_t { Lookup, AnkiAdd };
 
   explicit DictionaryWordSelectActivity(GfxRenderer& renderer, MappedInputManager& mappedInput,
                                         std::unique_ptr<Page> page, int marginLeft, int marginTop,
-                                        Mode mode = Mode::Lookup, std::string bookTitle = {}, int initialX = -1,
-                                        int initialY = -1)
+                                        std::string dictionaryName, Mode mode = Mode::Lookup,
+                                        std::string bookTitle = {}, int initialX = -1, int initialY = -1)
       : Activity("DictionaryWordSelect", renderer, mappedInput),
         page(std::move(page)),
         marginLeft(marginLeft),
         marginTop(marginTop),
+        dictionaryName(std::move(dictionaryName)),
         mode(mode),
         bookTitle(std::move(bookTitle)),
         initialX(initialX),
@@ -73,6 +75,7 @@ class DictionaryWordSelectActivity final : public Activity {
   std::unique_ptr<Page> page;
   const int marginLeft;
   const int marginTop;
+  const std::string dictionaryName;
   const Mode mode;
   const std::string bookTitle;
   // Screen point to preselect from (a touch long-press on the page); -1 = none.

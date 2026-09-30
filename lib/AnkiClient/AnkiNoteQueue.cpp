@@ -213,10 +213,14 @@ std::string cleanWord(const std::string& token) {
   return token.substr(b, e - b);
 }
 
-std::string frontHtml(const std::string& word, const std::string& sentence) {
+std::string frontHtml(const std::string& word, const std::string& sentence, const std::string& headword) {
   const std::string w = ankimarkup::htmlEscape(word);
-  std::string html = "<b>" + w + "</b>";
-  if (sentence.empty()) return html;
+  std::string html = "<b>" + (headword.empty() ? w : ankimarkup::htmlEscape(headword)) + "</b>";
+  if (sentence.empty()) {
+    // Keep the form from the book when the headword replaced it on top.
+    if (!headword.empty()) html += "<br><br><b>" + w + "</b>";
+    return html;
+  }
   std::string s = ankimarkup::htmlEscape(sentence);
   // Bold the first occurrence of the word inside the sentence.
   const size_t at = s.find(w);

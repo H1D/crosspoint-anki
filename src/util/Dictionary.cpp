@@ -9,6 +9,8 @@
 #include <cstdio>
 #include <cstring>
 
+#include "DictLanguage.h"
+#include "DictStemmer.h"
 #include "DictZip.h"
 #include "DictionaryRegistry.h"
 #include "StringUtils.h"
@@ -64,21 +66,17 @@ uint32_t readBe32(const uint8_t* p) {
 // continuation/lead byte, so accented words keep their edges.
 bool isWordByte(unsigned char c) { return c >= 0x80 || std::isalnum(c) != 0; }
 
-// Facts read from the .ifo at open time. Only the first 2KB is scanned — .ifo
-// headers are tiny and both keys always appear early when present.
+// Facts read from the .ifo head (DictionaryRegistry::readIfo) at open time.
 struct IfoFacts {
   bool offsets64 = false;        // idxoffsetbits=64 (unsupported)
   bool htmlDefinitions = false;  // sametypesequence=h (definitions are HTML)
+  std::string language;          // headword language, "" when unknown
 };
 
-IfoFacts readIfoFacts(const std::string& ifoPath) {
+IfoFacts readIfoFacts(const std::string& ifo, const char* folderName) {
   IfoFacts facts;
-  HalFile ifo;
-  if (!Storage.openFileForRead("DICT", ifoPath, ifo)) return facts;
-  char buf[2048];
-  const int n = ifo.read(buf, sizeof(buf) - 1);
-  if (n <= 0) return facts;
-  buf[n] = '\0';
+  facts.language = DictLanguage::sourceOf(ifo, folderName);
+  const char* buf = ifo.c_str();
   const char* line = strstr(buf, "idxoffsetbits");
   const char* eq = line ? strchr(line, '=') : nullptr;
   facts.offsets64 = eq && strtol(eq + 1, nullptr, 10) == 64;
@@ -98,6 +96,7 @@ bool Dictionary::open(const char* folderName) {
   basePath.clear();
   hasSyn = false;
   htmlDefinitions = false;
+  sourceLanguage.clear();
   std::string resolved;
   if (!DictionaryRegistry::resolveBasePath(folderName, resolved)) {
     LOG_ERR("DICT", "No dictionary found in folder '%s'", folderName ? folderName : "");
@@ -113,7 +112,7 @@ bool Dictionary::open(const char* folderName) {
     LOG_ERR("DICT", "%s has no .dict or .dict.dz", resolved.c_str());
     return false;
   }
-  const IfoFacts ifo = readIfoFacts(resolved + ".ifo");
+  IfoFacts ifo = readIfoFacts(DictionaryRegistry::readIfo(resolved), folderName);
   if (ifo.offsets64) {
     LOG_ERR("DICT", "%s uses 64-bit index offsets (unsupported)", resolved.c_str());
     return false;
@@ -126,6 +125,8 @@ bool Dictionary::open(const char* folderName) {
   }
   hasSyn = Storage.exists((resolved + ".syn").c_str());
   htmlDefinitions = ifo.htmlDefinitions;
+  sourceLanguage = std::move(ifo.language);
+  LOG_DBG("DICT", "Opened %s (language '%s')", folderName, sourceLanguage.c_str());
 
   basePath = std::move(resolved);
   return true;
@@ -371,7 +372,7 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t s
       lo = 0;  // unreadable sample: abandon the descent and scan from the start
       break;
     }
-    if (StringUtils::asciiCaseCmp(wordBuf, target) <= 0) {
+    if (StringUtils::asciiCaseCmp(wordBuf, target) < 0) {
       lo = mid;
     } else {
       hi = mid - 1;
@@ -386,7 +387,7 @@ uint32_t Dictionary::bisectSamples(HalFile& sidecar, HalFile& source, uint32_t s
 DictLocation Dictionary::locate(LookupSession& session, const char* target, std::string* matchedHeadwordOut) {
   DictLocation result;
 
-  // Bisect the sampled offsets to the last sample whose headword <= target.
+  // Bisect the sampled offsets to the last sample whose headword < target.
   const uint32_t startByte = bisectSamples(session.qidx, session.idx, session.sampleCount, target);
 
   // Linear scan of at most SAMPLE_INTERVAL entries: headword NUL, BE32 offset,
@@ -407,13 +408,21 @@ DictLocation Dictionary::locate(LookupSession& session, const char* target, std:
 
     const int cmp = StringUtils::asciiCaseCmp(wordBuf, target);
     if (cmp == 0) {
-      result.offset = readBe32(suffix);
-      result.size = readBe32(suffix + 4);
-      result.found = true;
-      if (matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
-      return result;
+      if (!result.found) {
+        result.offset = readBe32(suffix);
+        result.size = readBe32(suffix + 4);
+        result.found = true;
+        if (matchedHeadwordOut) *matchedHeadwordOut = wordBuf;
+      } else {
+        result.extraOffset[result.extraCount] = readBe32(suffix);
+        result.extraSize[result.extraCount] = readBe32(suffix + 4);
+        result.extraCount++;
+      }
+      // Entries sharing a headword are adjacent; collect the ones that follow.
+      if (result.extraCount == DictLocation::MAX_EXTRA) break;
+      continue;
     }
-    if (cmp > 0) break;
+    if (cmp > 0 || result.found) break;
   }
   return result;
 }
@@ -466,7 +475,7 @@ DictLocation Dictionary::locateSynonym(LookupSession& session, const char* targe
     return result;
   }
 
-  // Bisect the sampled offsets to the last synonym <= target, same descent
+  // Bisect the sampled offsets to the last synonym < target, same descent
   // locate() runs over .qidx/.idx.
   const uint32_t startByte = bisectSamples(session.sidx, session.syn, session.synSampleCount, target);
 
@@ -597,36 +606,6 @@ std::string Dictionary::cleanWord(const char* word) {
   return result;
 }
 
-void Dictionary::stemVariants(const std::string& word, std::vector<std::string>& out) {
-  out.clear();
-  out.reserve(6);
-  const size_t n = word.size();
-  const auto add = [&out](std::string v) {
-    if (std::find(out.begin(), out.end(), v) == out.end()) out.push_back(std::move(v));
-  };
-  // endsWith requires a non-empty remainder so variants never come out empty.
-  const auto endsWith = [&word, n](const char* suffix) {
-    const size_t len = strlen(suffix);
-    return n > len && word.compare(n - len, len, suffix) == 0;
-  };
-
-  if (endsWith("'s")) add(word.substr(0, n - 2));
-  if (endsWith("\xE2\x80\x99s")) add(word.substr(0, n - 4));  // U+2019 apostrophe
-  if (endsWith("ies")) add(word.substr(0, n - 3) + "y");      // stories -> story
-  if (endsWith("es")) add(word.substr(0, n - 2));             // boxes -> box
-  if (endsWith("s")) add(word.substr(0, n - 1));              // dogs -> dog
-  if (endsWith("ed")) {
-    add(word.substr(0, n - 2));                                            // walked -> walk
-    add(word.substr(0, n - 1));                                            // loved -> love
-    if (n >= 4 && word[n - 3] == word[n - 4]) add(word.substr(0, n - 3));  // stopped -> stop
-  }
-  if (endsWith("ing")) {
-    add(word.substr(0, n - 3));                                            // walking -> walk
-    add(word.substr(0, n - 3) + "e");                                      // making -> make
-    if (n >= 5 && word[n - 4] == word[n - 5]) add(word.substr(0, n - 4));  // running -> run
-  }
-}
-
 bool Dictionary::lookup(const char* word, std::string& definitionOut, std::string& matchedHeadwordOut,
                         LookupResult* outResult) {
   const auto setResult = [outResult](LookupResult r) {
@@ -650,8 +629,23 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
       return false;
     }
 
-    location = locate(session, cleaned.c_str(), &matchedHeadwordOut);
-    searchFailed = location.readError;
+    // An irregular verb form ("liep") goes to its infinitive before the
+    // exact match: many such forms are also nouns ("was", "lag").
+    const char* irregular = DictStemmer::irregularLemma(cleaned, sourceLanguage);
+    if (irregular) {
+      location = locate(session, irregular, &matchedHeadwordOut);
+      searchFailed = location.readError;
+      if (location.found) {
+        // The form can be a word of its own too ("roken" to smoke, "vroeg"
+        // early): its entries follow the verb's.
+        const DictLocation own = locate(session, cleaned.c_str(), nullptr);
+        if (own.found) addExtras(location, own);
+      }
+    }
+    if (!location.found) {
+      location = locate(session, cleaned.c_str(), &matchedHeadwordOut);
+      searchFailed = searchFailed || location.readError;
+    }
 
     // Dictionary-authored synonyms (alternate spellings, irregular forms) take
     // precedence over the English-only stemmer, and are language-agnostic.
@@ -662,7 +656,7 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
 
     if (!location.found) {
       std::vector<std::string> variants;
-      stemVariants(cleaned, variants);
+      DictStemmer::variants(cleaned, sourceLanguage, variants);
       for (const auto& variant : variants) {
         location = locate(session, variant.c_str(), &matchedHeadwordOut);
         searchFailed = searchFailed || location.readError;
@@ -681,8 +675,44 @@ bool Dictionary::lookup(const char* word, std::string& definitionOut, std::strin
   // Found in the index — propagate the precise failure reason from readDefinition
   // (decompression / low memory / read error) so the caller can name it.
   if (readDefinition(location, definitionOut, outResult)) {
+    appendExtraDefinitions(location, definitionOut);
     setResult(LookupResult::Found);
     return true;
   }
   return false;
+}
+
+void Dictionary::addExtras(DictLocation& location, const DictLocation& more) {
+  const auto add = [&location](const uint32_t offset, const uint32_t size) {
+    if (location.extraCount == DictLocation::MAX_EXTRA) return;
+    location.extraOffset[location.extraCount] = offset;
+    location.extraSize[location.extraCount] = size;
+    location.extraCount++;
+  };
+  add(more.offset, more.size);
+  for (uint8_t i = 0; i < more.extraCount; i++) add(more.extraOffset[i], more.extraSize[i]);
+}
+
+void Dictionary::appendExtraDefinitions(const DictLocation& location, std::string& out) {
+  for (uint8_t i = 0; i < location.extraCount; i++) {
+    if (out.size() >= MAX_DEFINITION_BYTES) return;
+    DictLocation extra;
+    extra.offset = location.extraOffset[i];
+    extra.size = std::min<uint32_t>(location.extraSize[i], MAX_DEFINITION_BYTES - static_cast<uint32_t>(out.size()));
+    extra.found = true;
+    std::string text;
+    if (!readDefinition(extra, text)) {
+      LOG_ERR("DICT", "Skipping unreadable entry %u of the headword", static_cast<unsigned>(i + 2));
+      continue;
+    }
+    // Appending reallocates `out` while it and `text` are both alive; growth
+    // that fails aborts (-fno-exceptions), so stop at what fits.
+    if (ESP.getMaxAllocHeap() < out.size() + text.size() + 2 + DEFINITION_HEAP_HEADROOM_BYTES) {
+      LOG_ERR("DICT", "Low heap: dropping %u further entries", static_cast<unsigned>(location.extraCount - i));
+      return;
+    }
+    // HTML entries are block-level already; plain text needs a paragraph break.
+    if (!htmlDefinitions) out += "\n\n";
+    out += text;
+  }
 }
