@@ -9,11 +9,11 @@ Everything else is stock CrossPoint ([upstream README](https://github.com/crossp
 
 | | |
 |---|---|
-| ![](docs/anki/img/home.png) | **Anki on the home screen.** |
-| ![](docs/anki/img/review.gif) | **Review cards.** Confirm flips. Left = Again, Right = Good, side Down = Hard, side Up = Easy (or tap the strips). Anki does the scheduling. |
-| ![](docs/anki/img/add-word.gif) | **Add a word from a book.** Long-press a word (or reader menu → Add to Anki), confirm it, tick one or more accounts (each row shows its deck; long-press a row to pick another), **Add**. Front: the word's dictionary form + the sentence. Back: just its translations, if a dictionary is set up. |
-| ![](docs/anki/img/dictionary.gif) | **Dictionaries per book language.** Put one [StarDict](docs/dictionary.md) dictionary per language in `/dictionaries/` ([WikDict](https://download.wikdict.com/dictionaries/stardict/) has most pairs); each book uses the one for its own language. Inflected words find their dictionary form (Dutch *staarde* → *staren*, *weilanden* → *weiland*; English *walked* → *walk*), and WikDict entries show as meaning → translations. With no Anki account enabled, long-press looks the word up. |
-| ![](docs/anki/img/settings.png) | **Offline first.** Cards are cached on the SD card; grades and new notes queue up and sync on demand, when you leave the review screen, or when the device goes to sleep. |
+| <img src="docs/anki/img/home.png" width="400"> | **Anki on the home screen.** |
+| <img src="docs/anki/img/review.gif" width="400"> | **Review cards.** Confirm flips. Left = Again, Right = Good, side Down = Hard, side Up = Easy (or tap the strips). Anki does the scheduling. |
+| <img src="docs/anki/img/add-word.gif" width="400"> | **Add a word from a book.** Long-press a word (or reader menu → Add to Anki), confirm it, tick one or more accounts (each row shows its deck; long-press a row to pick another), **Add**. Front: the word's dictionary form + the sentence. Back: just its translations, if a dictionary is set up. |
+| <img src="docs/anki/img/dictionary.gif" width="400"> | **Dictionaries per book language.** Put one [StarDict](docs/dictionary.md) dictionary per language in `/dictionaries/` ([WikDict](https://download.wikdict.com/dictionaries/stardict/) has most pairs); each book uses the one for its own language. Inflected words find their dictionary form (Dutch *staarde* → *staren*, *weilanden* → *weiland*; English *walked* → *walk*), and WikDict entries show as meaning → translations. With no Anki account enabled, long-press looks the word up. |
+| <img src="docs/anki/img/settings.png" width="400"> | **Offline first.** Cards are cached on the SD card; grades and new notes queue up and sync on demand, when you leave the review screen, or when the device goes to sleep. |
 
 ## Flash
 
