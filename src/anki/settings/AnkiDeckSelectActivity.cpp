@@ -6,6 +6,7 @@
 #include <Logging.h>
 
 #include <algorithm>
+#include <iterator>
 
 #include "MappedInputManager.h"
 #include "activities/ActivityResult.h"
@@ -77,9 +78,8 @@ void AnkiDeckSelectActivity::onEnter() {
     if (!d.name.empty()) names_.push_back(std::move(d.name));
   }
   // Selected decks the cache does not know keep a row so they can be changed.
-  for (const std::string& s : selected_) {
-    if (std::find(names_.begin(), names_.end(), s) == names_.end()) names_.push_back(s);
-  }
+  std::copy_if(selected_.begin(), selected_.end(), std::back_inserter(names_),
+               [this](const std::string& s) { return std::find(names_.begin(), names_.end(), s) == names_.end(); });
   if (names_.empty()) return;  // empty state drawn by buildScreen()
 
   const bool multi = mode == Mode::Multi;

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 
 #include "AnkiAccountPickerActivity.h"
 #include "AnkiSyncActivity.h"
@@ -157,7 +158,7 @@ void AnkiReviewActivity::flip() {
   RenderLock lock;
   std::vector<ankimarkup::Run> answer = ankimarkup::parse(card.a);
   runs.reserve(runs.size() + answer.size());
-  for (auto& run : answer) runs.push_back(std::move(run));
+  runs.insert(runs.end(), std::make_move_iterator(answer.begin()), std::make_move_iterator(answer.end()));
   mode = Mode::Back;
   layout();
   // Open on the page that shows the answer.
@@ -180,12 +181,10 @@ void AnkiReviewActivity::onBack() {
   bool pending = false;
   {
     AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
-    for (const AnkiAccount& account : ANKI_STORE.getAccounts()) {
-      if (account.enabled && engine.hasPending(account)) {
-        pending = true;
-        break;
-      }
-    }
+    const auto& accounts = ANKI_STORE.getAccounts();
+    pending = std::any_of(accounts.begin(), accounts.end(), [&engine](const AnkiAccount& account) {
+      return account.enabled && engine.hasPending(account);
+    });
   }
   if (pending) {
     auto sync = makeUniqueNoThrow<AnkiSyncActivity>(renderer, mappedInput, AnkiSyncActivity::ReturnTo::Home);

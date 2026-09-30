@@ -93,7 +93,7 @@ class AnkiLineReader {
 
  private:
   AnkiFile& file;
-  char buf[256];
+  char buf[256] = {};
   size_t pos = 0;
   size_t fill = 0;
 };

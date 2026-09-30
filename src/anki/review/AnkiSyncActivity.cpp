@@ -109,7 +109,6 @@ void AnkiSyncActivity::performSync() {
     }
   }
 
-  char buf[64];
   {
     RenderLock lock;
     detailCount = 0;
@@ -125,6 +124,7 @@ void AnkiSyncActivity::performSync() {
       } else if (failed) {
         addDetail(firstError);
       }
+      char buf[64];
       snprintf(buf, sizeof(buf), tr(STR_ANKI_REVIEWS_SENT), static_cast<int>(reviews));
       addDetail(buf);
       snprintf(buf, sizeof(buf), tr(STR_ANKI_NOTES_SENT), static_cast<int>(notes));
