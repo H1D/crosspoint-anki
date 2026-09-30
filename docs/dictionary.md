@@ -35,7 +35,7 @@ Two ways to start a lookup while reading:
 
 - Open the reader menu (**Confirm**) and choose **Look Up**.
 - Or set **Settings → Controls → Long-press Menu** to "Dictionary", then hold **Confirm** (~0.4s) on the reading page.
-- On touch devices, long-press a word on the page. (With an Anki account enabled, this opens "Add to Anki" instead.)
+- On touch devices, long-press a word on the page.
 
 One word on the page becomes highlighted:
 
@@ -56,13 +56,16 @@ On the very first lookup with a dictionary (and again whenever the `.idx` or `.s
 
 ## The Definition Screen
 
-When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions. A headword with several entries (noun and verb, say) shows all of them.
+When a word is found, the definition screen shows the matched headword at the top and the definition text below, with a page counter for long definitions. A headword with several entries (noun and verb, say) shows all of them. On touch devices the arrow in the header goes back.
+
+With an Anki account enabled, an **Add to Anki** button sits under the definition (**Confirm** on devices with buttons). It opens a preview of the card (front, example sentence, back) with the accounts to add it to; see the [README](../README.md).
 
 WikDict dictionaries are shown in a compact form: the part of speech, then one line per meaning, *explanation* — translations. The pronunciation is left out; the reader fonts cannot draw its phonetic symbols.
 
 HTML dictionaries that declare `sametypesequence=h` use the EPUB text-layout engine for semantic formatting such as headings, bold, italics, lists, and line breaks. Images and CSS styling are ignored. Definitions that are too large or cannot be laid out within the available memory fall back to plain text.
 
 - **Left/Right** or side **Up/Down** — previous / next page
+- **Confirm** — Add to Anki (with an Anki account enabled)
 - **Back** — return to word selection
 
 

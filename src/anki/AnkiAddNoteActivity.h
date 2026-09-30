@@ -9,26 +9,30 @@
 
 #include "activities/UiListActivity.h"
 
-// "Add to Anki" checklist over the reader's word-select screen. One line
-// above the list shows the picked word and its dictionary translation (if
-// any); below it, one checkbox row per enabled account with the target deck
-// as its subtitle, then an "Add" row that queues one note per checked account
+// One word's note-to-be, gathered by the word picker.
+struct AnkiNoteDraft {
+  // As picked on the page.
+  std::string word;
+  // Dictionary form of `word` when a lookup found a different one ("komen"
+  // for "kwam"), else empty. Goes on the card instead of `word`.
+  std::string headword;
+  std::string sentence;
+  std::string translation;
+  std::string bookTitle;
+};
+
+// "Add to Anki" screen: a preview of the card (front, example sentence,
+// back) above one checkbox row per enabled account with its target deck as
+// subtitle, then an "Add" row that queues one note per checked account
 // (notes.jsonl) for the next sync. Left/Right cycle the highlighted account's
 // deck; a long press on its row (Confirm hold or touch) opens the deck list.
-// Deck choices are for this add only. The checked set is remembered across
-// adds. The result is cancelled unless notes were queued.
+// The deck a note is added to becomes the account's default deck; the
+// checked set is remembered across adds. The result is cancelled unless
+// notes were queued.
 class AnkiAddNoteActivity final : public UiListActivity {
  public:
-  // `noteWord`, not `word`: Arduino.h defines word(...) as a macro.
-  explicit AnkiAddNoteActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string noteWord,
-                               std::string headword, std::string sentence, std::string translation,
-                               std::string bookTitle)
-      : UiListActivity("AnkiAddNote", renderer, mappedInput, /*wantsTouchLongPress=*/true),
-        noteWord(std::move(noteWord)),
-        headword(std::move(headword)),
-        sentence(std::move(sentence)),
-        translation(std::move(translation)),
-        bookTitle(std::move(bookTitle)) {}
+  explicit AnkiAddNoteActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, AnkiNoteDraft draft)
+      : UiListActivity("AnkiAddNote", renderer, mappedInput, /*wantsTouchLongPress=*/true), draft(std::move(draft)) {}
 
   void onEnter() override;
   void render(RenderLock&&) override;
@@ -66,16 +70,15 @@ class AnkiAddNoteActivity final : public UiListActivity {
   void queueNotes();
   bool anyChecked() const;
 
-  const std::string noteWord;
-  // Dictionary form of noteWord when a lookup found a different one ("komen"
-  // for "kwam"), else empty. Goes on the card instead of noteWord.
-  const std::string headword;
-  const std::string sentence;
-  const std::string translation;
-  const std::string bookTitle;
-  // The one-line band above the list: "word — translation", or
-  // "word (headword) — translation".
-  std::string summary;
+  // Card preview above the list, then the dimmed "hold to change" after
+  // each account row's deck name.
+  void buildPreview(UiScreen& screen);
+  void drawDeckHints(UiScreen& screen, const freeink::ui::ListProps& props, freeink::ui::Rect area);
+  // Text in `style`, its ink thinned to a 50% checkerboard: the renderer has
+  // no dithered text, so FUI's gray text colors draw solid black.
+  void drawDimmedText(UiScreen& screen, freeink::ui::Rect rect, const char* text, const freeink::ui::TextStyle& style);
+
+  const AnkiNoteDraft draft;
 
   std::vector<Target> targets;
   // One row per target + the Add row.

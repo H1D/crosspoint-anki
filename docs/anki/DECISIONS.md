@@ -281,6 +281,30 @@ whole afterwards.
 - **Touch long-press without Anki (2026-09-30).** With no enabled account, a
   long press on a word opens the dictionary picker on it instead of doing
   nothing (when a dictionary is selected).
+- **Definition first, then add (2026-09-30, reverses the one-line band).**
+  A picked word opens the normal definition screen; with an Anki account
+  enabled it has an "Add to Anki" button (Confirm on button boards) that
+  opens the add screen. Reading the translation and adding the card were
+  one cramped line before. The add screen now previews the card: front (the
+  dictionary form), the example sentence (3 lines) and back, each under a
+  dimmed caption, in a bordered box above the account rows. Without a
+  dictionary, or when the word is not in it, "Add to Anki" still opens the
+  add screen directly with an empty back.
+- **"hold to change" after the deck (2026-09-30).** The long-press on an
+  account row was undiscoverable. FreeInkUI draws a row subtitle as one
+  run, so the dimmed hint is drawn after it at the list's row geometry.
+  Dimmed text is black ink thinned to a checkerboard: the renderer has no
+  dithered text, so FUI's gray text colors come out solid black. The
+  selected row keeps the hint in solid ink; on the gray selection pill the
+  checkerboard is unreadable.
+- **Last used deck is saved (2026-09-30, reverses "Default deck is a
+  setting").** Each add stores the deck it went to as the account's "Deck
+  for new words", so the next add starts there. Picking a deck and then
+  backing out saves nothing.
+- **Back button on the definition screen (2026-09-30).** The definition
+  screen drew its own header, so touch boards (no button hints) had no
+  visible way back but the edge swipe. It now uses the theme header, which
+  carries the tappable back arrow.
 
 ## Dictionaries (2026-09-30)
 

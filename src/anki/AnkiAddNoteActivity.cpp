@@ -58,10 +58,6 @@ void AnkiAddNoteActivity::onEnter() {
   ActivityResult cancelled;
   cancelled.isCancelled = true;
   setResult(std::move(cancelled));
-  summary = noteWord;
-  if (!headword.empty()) summary += " (" + headword + ")";
-  summary += " \xE2\x80\x94 ";
-  summary += translation.empty() ? tr(STR_ANKI_NO_TRANSLATION) : translation;
   ANKI_STORE.loadFromFile();
   buildTargets();
   refreshRows();
@@ -171,8 +167,11 @@ void AnkiAddNoteActivity::cycleDeck(const int direction) {
   Target& t = targets[static_cast<size_t>(index)];
   const int count = static_cast<int>(t.decks.size());
   if (count < 2) return;
-  t.deckPos = (t.deckPos + direction + count) % count;
-  refreshRows();
+  {
+    RenderLock lock;  // buildScreen reads the rows on the render task
+    t.deckPos = (t.deckPos + direction + count) % count;
+    refreshRows();
+  }
   requestUpdate();
 }
 
@@ -232,9 +231,12 @@ void AnkiAddNoteActivity::activateIndex(const int index) {
     return;
   }
   Target& t = targets[targetIndex];
-  t.checked = !t.checked;
-  setChecked(t.id, t.checked);
-  refreshRows();
+  {
+    RenderLock lock;
+    t.checked = !t.checked;
+    setChecked(t.id, t.checked);
+    refreshRows();
+  }
   requestUpdate();
 }
 
@@ -242,6 +244,7 @@ void AnkiAddNoteActivity::activateIndex(const int index) {
 void AnkiAddNoteActivity::openDeckPicker(const size_t targetIndex) {
   Target& t = targets[targetIndex];
   if (!t.checked) {
+    RenderLock lock;
     t.checked = true;
     setChecked(t.id, true);
     refreshRows();
@@ -273,14 +276,17 @@ void AnkiAddNoteActivity::openDeckPicker(const size_t targetIndex) {
 void AnkiAddNoteActivity::setDeck(const size_t targetIndex, const std::string& deck) {
   if (targetIndex >= targets.size() || deck.empty()) return;
   Target& t = targets[targetIndex];
-  const auto it = std::find(t.decks.begin(), t.decks.end(), deck);
-  if (it != t.decks.end()) {
-    t.deckPos = static_cast<int>(it - t.decks.begin());
-  } else {
-    t.decks.push_back(deck);
-    t.deckPos = static_cast<int>(t.decks.size()) - 1;
+  {
+    RenderLock lock;
+    const auto it = std::find(t.decks.begin(), t.decks.end(), deck);
+    if (it != t.decks.end()) {
+      t.deckPos = static_cast<int>(it - t.decks.begin());
+    } else {
+      t.decks.push_back(deck);
+      t.deckPos = static_cast<int>(t.decks.size()) - 1;
+    }
+    refreshRows();  // row pointers may point into the old deck storage
   }
-  refreshRows();  // row pointers may point into the old deck storage
   requestUpdate();
 }
 
@@ -291,11 +297,11 @@ void AnkiAddNoteActivity::queueNotes() {
   // Leaving the screen after the popup; a lingering flash would gray a row underneath.
   app.clearTapFlash();
 
-  const std::string front = ankinote::frontHtml(noteWord, sentence, headword);
+  const std::string front = ankinote::frontHtml(draft.word, draft.sentence, draft.headword);
   std::vector<std::string> tags;
   tags.reserve(2);
   tags.emplace_back("crosspoint");
-  if (!bookTitle.empty()) tags.push_back(ankinote::bookTag(bookTitle));
+  if (!draft.bookTitle.empty()) tags.push_back(ankinote::bookTag(draft.bookTitle));
 
   AnkiStorageFs& fs = AnkiStorageFs::instance();
   const auto& accounts = ANKI_STORE.getAccounts();
@@ -313,11 +319,13 @@ void AnkiAddNoteActivity::queueNotes() {
     note.deck = t.decks[static_cast<size_t>(t.deckPos)];
     note.model = account.model;
     note.front = front;
-    note.back = translation;
+    note.back = draft.translation;
     note.tags = tags;
     if (queue.append(note)) {
       pending = queue.count();
       queued++;
+      // The next add starts on this deck.
+      ANKI_STORE.setLastDeck(t.storeIndex, note.deck);
     } else {
       LOG_ERR("ANKI", "Failed to queue note for account %u", static_cast<unsigned>(t.id));
       failed++;
@@ -358,13 +366,7 @@ void AnkiAddNoteActivity::buildScreen(UiScreen& screen) {
     return;
   }
 
-  // One line, "word — translation", truncated; inset to the list's text edge.
-  fui::TextStyle summaryStyle = theme.bodyText;
-  summaryStyle.maxLines = 1;
-  const auto textInset = static_cast<int16_t>(theme.listInset + theme.listSidePadding);
-  const fui::Insets sideInset{0, textInset, 0, textInset};
-  screen.target().text(screen.takeTop(screen.target().lineHeight(summaryStyle.font), theme.spaceMd).inset(sideInset),
-                       summary.c_str(), summaryStyle);
+  buildPreview(screen);
 
   fui::ListProps props;
   props.items = rowItems.data();
@@ -372,11 +374,149 @@ void AnkiAddNoteActivity::buildScreen(UiScreen& screen) {
   props.action = ACTION_ROW;
   props.inputMask = fui::InputTouch | fui::InputLongPress;  // physical buttons stay in loop()
   syncListViewport(screen, props);
+  const fui::Rect listArea = screen.body();
   screen.list(props);
+  drawDeckHints(screen, props, listArea);
+}
+
+// The note as it will read in Anki: front word, the example sentence, and
+// the back, in a bordered card inset to the list's text edge.
+void AnkiAddNoteActivity::buildPreview(UiScreen& screen) {
+  const auto& theme = screen.theme();
+  auto& target = screen.target();
+  const auto inset = static_cast<int16_t>(theme.listInset);
+  const auto pad = static_cast<int16_t>(theme.listSidePadding);
+  const int16_t innerWidth = static_cast<int16_t>(screen.body().width - 2 * (inset + pad));
+  if (innerWidth <= 0) return;
+
+  const fui::TextStyle caption = theme.smallText;
+  fui::TextStyle front = theme.bodyText;
+  front.bold = true;
+  fui::TextStyle example = theme.smallText;
+  example.maxLines = 3;
+  fui::TextStyle back = theme.bodyText;
+  back.maxLines = 2;
+  const bool hasBack = !draft.translation.empty();
+
+  const char* frontText = draft.headword.empty() ? draft.word.c_str() : draft.headword.c_str();
+  const char* backText = hasBack ? draft.translation.c_str() : tr(STR_ANKI_NO_TRANSLATION);
+  const bool hasExample = !draft.sentence.empty();
+
+  // Caption + value blocks, each as tall as its wrapped text.
+  struct Block {
+    const char* caption;
+    const char* text;
+    const fui::TextStyle* style;
+    int16_t height;
+  };
+  Block blocks[3];
+  int blockCount = 0;
+  blocks[blockCount++] = {tr(STR_ANKI_FRONT), frontText, &front, 0};
+  if (hasExample) blocks[blockCount++] = {tr(STR_ANKI_EXAMPLE), draft.sentence.c_str(), &example, 0};
+  blocks[blockCount++] = {tr(STR_ANKI_CARD_BACK), backText, &back, 0};
+
+  const int16_t captionH = target.lineHeight(caption.font);
+  const auto gap = static_cast<int16_t>(theme.spaceSm);
+  // The card keeps at most half the screen body for the account rows below;
+  // on short (landscape) screens the example shrinks to one line first.
+  const auto maxCardH = static_cast<int16_t>(screen.body().height / 2);
+  int16_t cardH = 0;
+  for (int pass = 0; pass < 2; pass++) {
+    cardH = static_cast<int16_t>(2 * gap);
+    for (int i = 0; i < blockCount; i++) {
+      blocks[i].height = fui::measureWrappedText(target, blocks[i].text, *blocks[i].style, innerWidth).height;
+      cardH = static_cast<int16_t>(cardH + captionH + blocks[i].height + (i > 0 ? gap : 0));
+    }
+    if (cardH <= maxCardH || !hasExample || example.maxLines == 1) break;
+    example.maxLines = 1;
+  }
+
+  const fui::Rect band = screen.takeTop(cardH, theme.spaceMd);
+  const fui::Rect card{static_cast<int16_t>(band.x + inset), band.y, static_cast<int16_t>(band.width - 2 * inset),
+                       band.height};
+  target.stroke(card, fui::Paint::solid(fui::Color::Black), 1, theme.listRowRadius);
+  int16_t y = static_cast<int16_t>(card.y + gap);
+  const auto x = static_cast<int16_t>(card.x + pad);
+  for (int i = 0; i < blockCount; i++) {
+    if (i > 0) y = static_cast<int16_t>(y + gap);
+    if (y + captionH + blocks[i].height > card.bottom()) break;  // clamped band: drop what does not fit
+    drawDimmedText(screen, fui::Rect{x, y, innerWidth, captionH}, blocks[i].caption, caption);
+    y = static_cast<int16_t>(y + captionH);
+    const fui::Rect textRect{x, y, innerWidth, blocks[i].height};
+    if (blocks[i].text == backText && !hasBack) {
+      drawDimmedText(screen, textRect, backText, back);
+    } else {
+      target.text(textRect, blocks[i].text, *blocks[i].style);
+    }
+    y = static_cast<int16_t>(y + blocks[i].height);
+  }
+}
+
+// "hold to change", dimmed, after each account row's deck subtitle. The list
+// draws the subtitle as one run, so the hint is placed by the same row
+// geometry list() uses (rows stacked from the top of `area`, each sized by
+// measureListRow, the subtitle under a vertically centered label band).
+void AnkiAddNoteActivity::drawDeckHints(UiScreen& screen, const fui::ListProps& props, const fui::Rect area) {
+  auto& target = screen.target();
+  const char* hint = tr(STR_ANKI_HOLD_TO_CHANGE);
+  const int16_t rowInset = props.rowInset < 0 ? 0 : props.rowInset;
+  const int16_t sidePad = props.sidePadding < 0 ? 0 : props.sidePadding;
+  const int16_t rowGap = props.rowGap < 0 ? 0 : props.rowGap;
+  auto rowX = static_cast<int16_t>(area.x + rowInset);
+  auto rowWidth = static_cast<int16_t>(area.width - 2 * rowInset);
+  // list() narrows the rows for the scroll strip (syncListViewport sets props.nav, so it always reserves it).
+  const int16_t scrollWidth = props.scrollIndicatorWidth < 0 ? 3 : props.scrollIndicatorWidth;
+  const int16_t stripNeeded =
+      static_cast<int16_t>(scrollWidth + (props.scrollIndicatorInset < 0 ? 0 : props.scrollIndicatorInset) + 2);
+  if (props.scrollIndicator && scrollWidth > 0 && rowInset < stripNeeded) {
+    const auto cut = static_cast<int16_t>(stripNeeded - rowInset);
+    rowWidth = static_cast<int16_t>(rowWidth - cut);
+    if (props.scrollIndicatorSide == 1) rowX = static_cast<int16_t>(rowX + cut);
+  }
+  const auto textWidth = static_cast<int16_t>(rowWidth - 2 * sidePad);
+  const int16_t gap = target.measureText(props.subtitleText.font, "  ", props.subtitleText).width;
+  const int16_t hintWidth = target.measureText(props.subtitleText.font, hint, props.subtitleText).width;
+
+  int16_t y = area.y;
+  for (int i = props.topIndex; i < props.count && y < area.bottom(); i++) {
+    const fui::ListItem& item = props.items[i];
+    const fui::ListRowLayout layout = fui::measureListRow(target, screen.frame().assets(), rowWidth, props, item);
+    if (static_cast<size_t>(i) < targets.size() && item.subtitle && y + layout.height <= area.bottom()) {
+      const int16_t subtitleWidth =
+          target.measureText(props.subtitleText.font, item.subtitle, props.subtitleText).width;
+      if (subtitleWidth + gap + hintWidth <= textWidth) {
+        int16_t bandTop = static_cast<int16_t>(y + (layout.height - layout.labelHeight - layout.subtitleHeight) / 2);
+        if (bandTop < y) bandTop = y;
+        const fui::Rect hintRect{static_cast<int16_t>(rowX + sidePad + subtitleWidth + gap),
+                                 static_cast<int16_t>(bandTop + layout.labelHeight), hintWidth, layout.subtitleHeight};
+        // Dimmed on paper only: checkerboard ink is unreadable over the
+        // selection's gray pill, and a filled selection draws paper-colored text.
+        if (props.selectedIndex == i) {
+          const fui::Paint fg =
+              props.rowStyles.resolve(static_cast<fui::State>(item.state | fui::StateSelected)).foreground;
+          target.text(hintRect, hint, fui::textStyleWithForeground(props.subtitleText, fg));
+        } else {
+          drawDimmedText(screen, hintRect, hint, props.subtitleText);
+        }
+      }
+    }
+    y = static_cast<int16_t>(y + layout.height + rowGap);
+  }
 }
 
 void AnkiAddNoteActivity::render(RenderLock&& lock) {
   UiListActivity::render(std::move(lock));
   // drawPopup overlays the framebuffer and refreshes the display itself.
   if (popup != Popup::None) GUI.drawPopup(renderer, popupText);
+}
+
+// Clearing the odd (x + y) pixels leaves black ink on the even ones, the
+// DarkGray dither pattern. Paper stays white and the LightGray selection pill
+// (black only at even x and even y) keeps every dot.
+void AnkiAddNoteActivity::drawDimmedText(UiScreen& screen, const fui::Rect rect, const char* text,
+                                         const fui::TextStyle& style) {
+  screen.target().text(rect, text, style);
+  for (int y = rect.y; y < rect.bottom(); y++) {
+    for (int x = rect.x + ((rect.x + y + 1) & 1); x < rect.right(); x += 2) renderer.drawPixel(x, y, false);
+  }
 }
