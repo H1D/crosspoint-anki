@@ -44,6 +44,11 @@ class EpubReaderActivity final : public ReaderActivity {
   bool showBookmarkMessage = false;
   bool showDictionaryMessage = false;
   unsigned long dictionaryMessageTime = 0UL;
+  // Dictionary folder picked for this book's language, and the Settings
+  // choice it was picked from (re-picked when that changes).
+  std::string bookDictionary;
+  std::string bookDictionaryFor;
+  bool bookDictionaryPicked = false;
   bool currentPageBookmarked = false;
   int idlePrewarmSpine = -1;
   int idlePrewarmPage = -1;
@@ -161,9 +166,11 @@ class EpubReaderActivity final : public ReaderActivity {
   std::string moreRowValue(int row) const;
   void activateMoreRow(int row);
   void openFootnoteSelect(bool reopenMenuOnCancel);
-  void openDictionaryWordSelect();
-  // Word select in AnkiAdd mode; needs an enabled Anki account, not a dictionary.
+  // DictionaryRegistry::pickForBook for this book, cached.
+  const std::string& dictionaryForBook();
   // A touch point (from a long-press on the page) preselects the word under it.
+  void openDictionaryWordSelect(int touchX = -1, int touchY = -1);
+  // Word select in AnkiAdd mode; needs an enabled Anki account, not a dictionary.
   void openAnkiWordSelect(int touchX = -1, int touchY = -1);
   bool launchKOReaderSync();
   unsigned long confirmLongPressThreshold() const;

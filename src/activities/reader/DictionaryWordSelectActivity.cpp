@@ -17,6 +17,7 @@
 #include "anki/AnkiAddNoteActivity.h"
 #include "components/UITheme.h"
 #include "util/HtmlToPlainText.h"
+#include "util/WikDict.h"
 
 namespace {
 
@@ -198,7 +199,7 @@ void DictionaryWordSelectActivity::activateSelected() {
 void DictionaryWordSelectActivity::openDictionaryOnce() {
   if (!dictOpenAttempted) {
     dictOpenAttempted = true;
-    dictOpenOk = dict.open(SETTINGS.dictionaryName);
+    dictOpenOk = dict.open(dictionaryName.c_str());
     // needsIndex() opens and validates the .qidx sidecar, so ask it once per
     // open rather than once per word: the answer only changes when we build
     // the sidecar ourselves, which is handled in lookupWord().
@@ -227,6 +228,12 @@ void DictionaryWordSelectActivity::performLookup() {
   std::string headword;
   if (lookupWord(words[selected].text, definition, headword)) {
     popup = Popup::None;
+    // WikDict entries read better as "gloss — translations" per sense than
+    // laid out as delivered (nested lists, IPA the fonts cannot draw).
+    if (dict.definitionsAreHtml()) {
+      std::string compact = WikDict::compactHtml(definition);
+      if (!compact.empty()) definition = std::move(compact);
+    }
     startActivityForResult(
         std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
                                                        std::move(definition), dict.definitionsAreHtml()),
@@ -310,20 +317,24 @@ void DictionaryWordSelectActivity::performAnkiAdd() {
   // Translation is best effort: a configured dictionary that misses, fails or
   // is absent leaves the Back field empty to fill in on the phone.
   std::string translation;
-  if (SETTINGS.dictionaryName[0] != '\0') {
+  std::string headword;
+  if (!dictionaryName.empty()) {
     popup = Popup::Busy;
     openDictionaryOnce();
     requestUpdateAndWait();
     std::string definition;
-    std::string headword;
     if (lookupWord(noteWord.c_str(), definition, headword)) {
-      translation = definitionToTranslation(std::move(definition));
+      // Just the translated words when the HTML has WikDict's layout, else the whole entry as text.
+      if (dict.definitionsAreHtml()) translation = WikDict::shortTranslation(definition);
+      if (translation.empty()) translation = definitionToTranslation(std::move(definition));
     }
+    // Only a different word is worth showing: "Walk" for "walk" is not.
+    if (Dictionary::cleanWord(headword.c_str()) == Dictionary::cleanWord(noteWord.c_str())) headword.clear();
     popup = Popup::None;
   }
 
-  auto modal = makeUniqueNoThrow<AnkiAddNoteActivity>(renderer, mappedInput, std::move(noteWord), std::move(sentence),
-                                                      std::move(translation), bookTitle);
+  auto modal = makeUniqueNoThrow<AnkiAddNoteActivity>(renderer, mappedInput, std::move(noteWord), std::move(headword),
+                                                      std::move(sentence), std::move(translation), bookTitle);
   if (!modal) {
     LOG_ERR("DICT", "OOM: AnkiAddNoteActivity");
     popup = Popup::Error;

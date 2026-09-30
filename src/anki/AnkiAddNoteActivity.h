@@ -9,20 +9,23 @@
 
 #include "activities/UiListActivity.h"
 
-// "Add to Anki" checklist over the reader's word-select screen. A band above
-// the list shows the picked word, its sentence and the dictionary translation
-// (if any); below it, per enabled account, a checkbox row and a "Deck" row
-// that opens the deck list (Left/Right also cycle it; never persisted), then
-// an "Add" row that queues one note per checked account (notes.jsonl) for
-// the next sync. The checked set is remembered across adds. The result is
-// cancelled unless notes were queued.
+// "Add to Anki" checklist over the reader's word-select screen. One line
+// above the list shows the picked word and its dictionary translation (if
+// any); below it, one checkbox row per enabled account with the target deck
+// as its subtitle, then an "Add" row that queues one note per checked account
+// (notes.jsonl) for the next sync. Left/Right cycle the highlighted account's
+// deck; a long press on its row (Confirm hold or touch) opens the deck list.
+// Deck choices are for this add only. The checked set is remembered across
+// adds. The result is cancelled unless notes were queued.
 class AnkiAddNoteActivity final : public UiListActivity {
  public:
   // `noteWord`, not `word`: Arduino.h defines word(...) as a macro.
   explicit AnkiAddNoteActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string noteWord,
-                               std::string sentence, std::string translation, std::string bookTitle)
-      : UiListActivity("AnkiAddNote", renderer, mappedInput),
+                               std::string headword, std::string sentence, std::string translation,
+                               std::string bookTitle)
+      : UiListActivity("AnkiAddNote", renderer, mappedInput, /*wantsTouchLongPress=*/true),
         noteWord(std::move(noteWord)),
+        headword(std::move(headword)),
         sentence(std::move(sentence)),
         translation(std::move(translation)),
         bookTitle(std::move(bookTitle)) {}
@@ -47,7 +50,9 @@ class AnkiAddNoteActivity final : public UiListActivity {
   int listCount() const override { return static_cast<int>(rowItems.size()); }
   void buildScreen(UiScreen& screen) override;
   void activateIndex(int index) override;
+  void onRowLongPress(int index) override;
   bool handleCustomInput() override;
+  bool handleButtons() override;
   const char* headerTitle() const override;
   void drawFooter() override;
 
@@ -55,20 +60,25 @@ class AnkiAddNoteActivity final : public UiListActivity {
   static std::vector<std::string> deckChoices(const AnkiAccount& account);
   void refreshRows();
   void cycleDeck(int direction);
+  // Ticks the account (choosing a deck implies adding to it), then opens its deck list.
   void openDeckPicker(size_t targetIndex);
   void setDeck(size_t targetIndex, const std::string& deck);
   void queueNotes();
   bool anyChecked() const;
 
   const std::string noteWord;
+  // Dictionary form of noteWord when a lookup found a different one ("komen"
+  // for "kwam"), else empty. Goes on the card instead of noteWord.
+  const std::string headword;
   const std::string sentence;
   const std::string translation;
   const std::string bookTitle;
-  // `sentence` as shown in the two-line band: cut in front so the word stays visible.
-  std::string sentenceShown;
+  // The one-line band above the list: "word — translation", or
+  // "word (headword) — translation".
+  std::string summary;
 
   std::vector<Target> targets;
-  // Two rows per target (checkbox, deck) + the Add row.
+  // One row per target + the Add row.
   std::vector<freeink::ui::ListItem> rowItems;
 
   Popup popup = Popup::None;

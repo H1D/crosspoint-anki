@@ -50,7 +50,9 @@ namespace ankinote {
 std::string sentenceAround(const std::vector<std::string>& words, size_t index);
 
 // Front field HTML: bold word, blank line, sentence with the word bolded.
-std::string frontHtml(const std::string& word, const std::string& sentence);
+// A non-empty `headword` (the dictionary form, "komen" for "kwam") replaces
+// the word on top; the sentence still bolds the word as written.
+std::string frontHtml(const std::string& word, const std::string& sentence, const std::string& headword = {});
 
 // Sanitizes a book title into a tag: spaces -> '_', tags cannot contain spaces.
 std::string bookTag(const std::string& title);

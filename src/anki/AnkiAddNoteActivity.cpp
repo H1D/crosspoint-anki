@@ -27,8 +27,8 @@ namespace {
 
 constexpr unsigned long POPUP_DURATION_MS = 1200;
 constexpr const char* DEFAULT_DECK = "Default";
-// Bytes of sentence kept before the word in the band; about one line.
-constexpr size_t SENTENCE_LEAD = 40;
+// Confirm hold on an account row that opens its deck list.
+constexpr unsigned long DECK_HOLD_MS = 500;
 
 // Accounts checked on the last add, kept across modals (ids, so store edits
 // in between cannot re-target them). Empty until the first open.
@@ -58,13 +58,10 @@ void AnkiAddNoteActivity::onEnter() {
   ActivityResult cancelled;
   cancelled.isCancelled = true;
   setResult(std::move(cancelled));
-  sentenceShown = sentence;
-  const size_t at = sentence.find(noteWord);
-  if (at != std::string::npos && at > SENTENCE_LEAD) {
-    // Start at a word boundary so no UTF-8 sequence is split.
-    const size_t cut = sentence.find(' ', at - SENTENCE_LEAD);
-    if (cut != std::string::npos && cut < at) sentenceShown = "\xE2\x80\xA6" + sentence.substr(cut + 1);
-  }
+  summary = noteWord;
+  if (!headword.empty()) summary += " (" + headword + ")";
+  summary += " \xE2\x80\x94 ";
+  summary += translation.empty() ? tr(STR_ANKI_NO_TRANSLATION) : translation;
   ANKI_STORE.loadFromFile();
   buildTargets();
   refreshRows();
@@ -137,25 +134,21 @@ bool AnkiAddNoteActivity::anyChecked() const {
 void AnkiAddNoteActivity::refreshRows() {
   rowItems.clear();
   if (targets.empty()) return;
-  rowItems.reserve(targets.size() * 2 + 1);
+  rowItems.reserve(targets.size() + 1);
   for (size_t i = 0; i < targets.size(); i++) {
     const Target& t = targets[i];
     fui::ListItem account;
     account.label = t.label.c_str();
+    account.subtitle = t.decks[static_cast<size_t>(t.deckPos)].c_str();
     account.toggle = true;
     account.toggleChecked = t.checked;
-    account.actionValue = static_cast<int16_t>(i * 2);
+    account.actionValue = static_cast<int16_t>(i);
     rowItems.push_back(account);
-    fui::ListItem deck;
-    deck.label = tr(STR_ANKI_DECK);
-    deck.value = t.decks[static_cast<size_t>(t.deckPos)].c_str();
-    deck.actionValue = static_cast<int16_t>(i * 2 + 1);
-    rowItems.push_back(deck);
   }
   fui::ListItem add;
   add.label = tr(STR_ANKI_ADD);
   add.enabled = anyChecked();
-  add.actionValue = static_cast<int16_t>(targets.size() * 2);
+  add.actionValue = static_cast<int16_t>(targets.size());
   rowItems.push_back(add);
 }
 
@@ -173,8 +166,8 @@ void AnkiAddNoteActivity::drawFooter() {
 }
 
 void AnkiAddNoteActivity::cycleDeck(const int direction) {
-  const int index = nav.selected / 2;
-  if (nav.selected < 0 || index >= static_cast<int>(targets.size())) return;
+  const int index = nav.selected;
+  if (index < 0 || index >= static_cast<int>(targets.size())) return;
   Target& t = targets[static_cast<size_t>(index)];
   const int count = static_cast<int>(t.decks.size());
   if (count < 2) return;
@@ -211,25 +204,34 @@ bool AnkiAddNoteActivity::handleCustomInput() {
   return false;
 }
 
+bool AnkiAddNoteActivity::handleButtons() {
+  if (mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, DECK_HOLD_MS)) {
+    onRowLongPress(nav.selected);
+    return true;
+  }
+  return UiListActivity::handleButtons();
+}
+
+void AnkiAddNoteActivity::onRowLongPress(const int index) {
+  nav.selected = index;
+  if (index < 0 || index >= static_cast<int>(rowItems.size())) return;
+  // A hold on Add (the press swallows its release) still adds.
+  if (index >= static_cast<int>(targets.size())) {
+    activateIndex(index);
+    return;
+  }
+  openDeckPicker(static_cast<size_t>(index));
+}
+
 void AnkiAddNoteActivity::activateIndex(const int index) {
   nav.selected = index;
   if (index < 0 || index >= static_cast<int>(rowItems.size())) return;
-  const size_t targetIndex = static_cast<size_t>(index / 2);
+  const size_t targetIndex = static_cast<size_t>(index);
   if (targetIndex >= targets.size()) {
     queueNotes();
     return;
   }
   Target& t = targets[targetIndex];
-  if (index % 2 == 1) {
-    // Choosing a deck implies adding to that account.
-    if (!t.checked) {
-      t.checked = true;
-      setChecked(t.id, true);
-      refreshRows();
-    }
-    openDeckPicker(targetIndex);
-    return;
-  }
   t.checked = !t.checked;
   setChecked(t.id, t.checked);
   refreshRows();
@@ -238,7 +240,12 @@ void AnkiAddNoteActivity::activateIndex(const int index) {
 
 // The account's synced deck list; before any sync, type the name instead.
 void AnkiAddNoteActivity::openDeckPicker(const size_t targetIndex) {
-  const Target& t = targets[targetIndex];
+  Target& t = targets[targetIndex];
+  if (!t.checked) {
+    t.checked = true;
+    setChecked(t.id, true);
+    refreshRows();
+  }
   const std::string& current = t.decks[static_cast<size_t>(t.deckPos)];
   auto onResult = [this, targetIndex](const ActivityResult& result) {
     if (result.isCancelled || !std::holds_alternative<KeyboardResult>(result.data)) return;
@@ -284,7 +291,7 @@ void AnkiAddNoteActivity::queueNotes() {
   // Leaving the screen after the popup; a lingering flash would gray a row underneath.
   app.clearTapFlash();
 
-  const std::string front = ankinote::frontHtml(noteWord, sentence);
+  const std::string front = ankinote::frontHtml(noteWord, sentence, headword);
   std::vector<std::string> tags;
   tags.reserve(2);
   tags.emplace_back("crosspoint");
@@ -351,29 +358,19 @@ void AnkiAddNoteActivity::buildScreen(UiScreen& screen) {
     return;
   }
 
-  // Note band: word (bold, one line), sentence (two lines), translation (two
-  // small lines); longer text truncates. Inset to the list's text edge.
-  fui::TextStyle wordStyle = theme.bodyText;
-  wordStyle.bold = true;
-  wordStyle.maxLines = 1;
-  fui::TextStyle sentenceStyle = theme.bodyText;
-  sentenceStyle.maxLines = 2;
-  fui::TextStyle translationStyle = theme.smallText;
-  translationStyle.maxLines = 2;
-  const int16_t bodyLine = screen.target().lineHeight(sentenceStyle.font);
-  const int16_t smallLine = screen.target().lineHeight(translationStyle.font);
-  const fui::Insets sideInset{0, theme.listSidePadding, 0, theme.listSidePadding};
-  screen.target().text(screen.takeTop(bodyLine, theme.spaceXs).inset(sideInset), noteWord.c_str(), wordStyle);
-  screen.target().text(screen.takeTop(static_cast<int16_t>(bodyLine * 2), theme.spaceXs).inset(sideInset),
-                       sentenceShown.c_str(), sentenceStyle);
-  screen.target().text(screen.takeTop(static_cast<int16_t>(smallLine * 2), theme.spaceMd).inset(sideInset),
-                       translation.empty() ? tr(STR_ANKI_NO_TRANSLATION) : translation.c_str(), translationStyle);
+  // One line, "word — translation", truncated; inset to the list's text edge.
+  fui::TextStyle summaryStyle = theme.bodyText;
+  summaryStyle.maxLines = 1;
+  const auto textInset = static_cast<int16_t>(theme.listInset + theme.listSidePadding);
+  const fui::Insets sideInset{0, textInset, 0, textInset};
+  screen.target().text(screen.takeTop(screen.target().lineHeight(summaryStyle.font), theme.spaceMd).inset(sideInset),
+                       summary.c_str(), summaryStyle);
 
   fui::ListProps props;
   props.items = rowItems.data();
   props.count = static_cast<uint16_t>(rowItems.size());
   props.action = ACTION_ROW;
-  props.inputMask = fui::InputTouch;  // physical buttons stay in loop()
+  props.inputMask = fui::InputTouch | fui::InputLongPress;  // physical buttons stay in loop()
   syncListViewport(screen, props);
   screen.list(props);
 }

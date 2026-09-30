@@ -1,5 +1,6 @@
 add_executable(AnkiClientTest
   AnkiClientTest.cpp
+  AnkiNoteFrontTest.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiJson.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiMarkup.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiJournal.cpp
