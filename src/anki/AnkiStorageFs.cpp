@@ -28,8 +28,10 @@ class StorageFile final : public AnkiFile {
 
 std::unique_ptr<AnkiFile> AnkiStorageFs::open(const std::string& path, Mode mode) {
   oflag_t flags = O_RDONLY;
-  if (mode == Mode::Write) flags = O_WRONLY | O_CREAT | O_TRUNC;
-  else if (mode == Mode::Append) flags = O_WRONLY | O_CREAT | O_APPEND;
+  if (mode == Mode::Write)
+    flags = O_WRONLY | O_CREAT | O_TRUNC;
+  else if (mode == Mode::Append)
+    flags = O_WRONLY | O_CREAT | O_APPEND;
   HalFile file = Storage.open(path.c_str(), flags);
   if (!file) {
     if (mode != Mode::Read) LOG_ERR("ANKI", "Cannot open %s for writing", path.c_str());

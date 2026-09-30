@@ -13,8 +13,8 @@ class AnkiSecureHttp final : public AnkiHttp {
     return http;
   }
 
-  int request(const char* method, const std::string& url, const std::vector<Header>& headers,
-              const std::string& body, const DataCallback& onData) override;
+  int request(const char* method, const std::string& url, const std::vector<Header>& headers, const std::string& body,
+              const DataCallback& onData) override;
 
   // Milliseconds to wait for headers / between body chunks.
   uint32_t timeoutMs = 20000;

@@ -37,9 +37,9 @@ int AnkiSecureHttp::request(const char* method, const std::string& url, const st
 
   LOG_DBG("ANKI", "%s %s (%u bytes, heap %u)", method, url.c_str(), static_cast<unsigned>(body.size()),
           static_cast<unsigned>(HalMemory::getDefaultHeap().freeBytes));
-  const int status = http.sendRequest(
-      method, reinterpret_cast<const uint8_t*>(body.data()), body.size(),
-      [&](const uint8_t* data, size_t len) { return onData(http.getStatus(), data, len); });
+  const int status =
+      http.sendRequest(method, reinterpret_cast<const uint8_t*>(body.data()), body.size(),
+                       [&](const uint8_t* data, size_t len) { return onData(http.getStatus(), data, len); });
   http.end();
   LOG_DBG("ANKI", "-> %d", status);
   return status;

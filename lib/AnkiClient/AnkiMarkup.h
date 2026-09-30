@@ -12,7 +12,7 @@ struct Run {
   std::string text;
   bool bold = false;
   bool italic = false;
-  bool cloze = false;  // draw boxed
+  bool cloze = false;    // draw boxed
   bool newline = false;  // a line break; text is empty
 };
 

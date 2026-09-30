@@ -56,7 +56,7 @@ std::string nextClientId() {
 }
 
 int64_t nowEpoch() {
-  struct tm local {};
+  struct tm local{};
   if (!halClock.localTime(local)) return 0;
   if (local.tm_year + 1900 < 2024) return 0;  // RTC never set: not trustworthy
   // localTime() fills a local-time tm under the configured TZ; mktime maps it
