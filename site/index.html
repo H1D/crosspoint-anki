@@ -115,6 +115,24 @@
     uses <a href="https://github.com/espressif/esptool-js">esptool-js</a> (Apache-2.0).
   </footer>
 
+  <dialog id="done-dialog" class="done-dialog" aria-labelledby="done-title">
+    <p class="done-kicker">Firmware installed</p>
+    <h2 id="done-title">Now start your reader</h2>
+    <p id="done-summary" class="hint"></p>
+    <ol id="done-steps" class="done-steps"></ol>
+    <div class="done-wait">
+      <p class="done-wait-title">The first boot is slow. Wait for it.</p>
+      <p>
+        The new firmware sets itself up on its first start, and the screen can stay unchanged while it does.
+        This is normal. <strong>Wait at least 2 minutes.</strong> Don't unplug the reader, press Reset, or
+        flash it again in the meantime.
+      </p>
+    </div>
+    <form method="dialog">
+      <button type="submit" class="primary" autofocus>OK, I'll wait for the first boot</button>
+    </form>
+  </dialog>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

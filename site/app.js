@@ -5,27 +5,40 @@ const REPO = 'H1D/crosspoint-anki';
 const RELEASES_API = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
 
 // id = asset suffix in crosspoint-<tag>-<id>.bin (see .github/workflows/release.yml).
+// bootSteps: what the user does after a successful flash, shown in the done dialog.
+// resetAfterFlash: pulse EN over RTS when done instead of leaving the chip in the
+// esptool stub. The Sticky needs it: its power button is a plain GPIO that can't
+// reset the chip and its battery keeps it powered when USB is unplugged, so a
+// device left in the stub stays dark. After the reset it boots, sees USB power
+// and goes to deep sleep, which the power button can wake it from.
 const DEVICES = [
   {
     id: 'x3-x4', name: 'Xteink X3 / X4', chip: 'ESP32-C3',
-    after: 'Unplug and reconnect the USB cable, then press and hold the power button for 3-5 seconds. Do not press Reset.',
+    bootSteps: [
+      'Unplug the USB cable and plug it back in.',
+      'Press and hold the power button for 3-5 seconds, then let go. Do not press Reset.',
+    ],
   },
   {
     id: 'x4pro', name: 'Xteink X4 Pro', chip: 'ESP32-S3',
-    after: 'Unplug and reconnect the USB cable, then press and hold the power button to boot.',
+    bootSteps: ['Unplug the USB cable and plug it back in.', 'Press and hold the power button to boot.'],
   },
   {
     id: 'x4c', name: 'Xteink X4 Classic (X4C)', chip: 'ESP32-S3',
-    after: 'Unplug and reconnect the USB cable, then press and hold the power button to boot.',
+    bootSteps: ['Unplug the USB cable and plug it back in.', 'Press and hold the power button to boot.'],
   },
   {
     id: 'sticky', name: 'Seeed reTerminal Sticky', chip: 'ESP32-S3',
-    after: 'Press and hold the power button (top right) until the device boots.',
+    resetAfterFlash: true,
+    bootSteps: [
+      'The flasher has restarted the Sticky and it is now asleep.',
+      'Press and hold the power button (top right) for about 3 seconds, then let go.',
+    ],
     firstInstallNote: true,
   },
   {
     id: 'papermono', name: 'M5 PaperMono', chip: 'ESP32-S3',
-    after: 'Press the power button to boot the device.',
+    bootSteps: ['Press the power button to boot the device.'],
     firstInstallNote: true,
   },
 ];
@@ -46,6 +59,9 @@ const ui = {
   log: $('log'),
   result: $('result'),
   firstInstall: $('first-install-note'),
+  doneDialog: $('done-dialog'),
+  doneSummary: $('done-summary'),
+  doneSteps: $('done-steps'),
 };
 
 let releases = [];
@@ -182,6 +198,17 @@ async function fetchReleaseFirmware(release, asset) {
 
 // --- flashing ---
 
+function showDoneDialog(device, sourceLabel, partition) {
+  ui.doneSummary.textContent = `${sourceLabel} was written to ${partition}.`;
+  ui.doneSteps.innerHTML = '';
+  for (const text of device.bootSteps) {
+    const li = document.createElement('li');
+    li.textContent = text;
+    ui.doneSteps.appendChild(li);
+  }
+  ui.doneDialog.showModal();
+}
+
 function renderSteps(names, states) {
   ui.steps.innerHTML = '';
   names.forEach((name, i) => {
@@ -216,7 +243,8 @@ async function flash() {
   }
 
   setBusy(true);
-  const stepNames = ['Get firmware', 'Connect to device', 'Read partition table', 'Read OTA data', 'Write firmware', 'Update boot partition', 'Disconnect'];
+  const stepNames = ['Get firmware', 'Connect to device', 'Read partition table', 'Read OTA data', 'Write firmware',
+    'Update boot partition', device.resetAfterFlash ? 'Reset device' : 'Disconnect'];
   const states = [];
   const paint = () => renderSteps(stepNames, states);
   try {
@@ -243,7 +271,7 @@ async function flash() {
 
     const flasher = new CrossPointFlasher(port, { expectedChip: device.chip, deviceName: device.name, terminal });
     const result = await flasher.flashFirmware(firmware, {
-      skipReset: true,
+      skipReset: !device.resetAfterFlash,
       onLog: log,
       onStepChange: (idx, _name, status) => { states[idx + 1] = status; paint(); },
       onProgress: (label, written, total) => {
@@ -254,8 +282,9 @@ async function flash() {
     });
     ui.progressLabel.textContent = 'Done';
     setResult('ok',
-      `<strong>Flashed ${sourceLabel} to ${result.partition}.</strong><br>${device.after}` +
-      '<br>The first boot after flashing takes longer than usual.');
+      `<strong>Flashed ${sourceLabel} to ${result.partition}.</strong><br>${device.bootSteps.join(' ')}` +
+      '<br><strong>The first boot is slow: wait at least 2 minutes before you touch anything.</strong>');
+    showDoneDialog(device, sourceLabel, result.partition);
   } catch (err) {
     const idx = states.findIndex((s) => s === 'running');
     if (idx >= 0) states[idx] = 'error';
