@@ -1,7 +1,9 @@
 #include "DictLanguage.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <iterator>
 
 namespace DictLanguage {
 namespace {
@@ -69,10 +71,9 @@ std::string primary(const std::string& tag) {
     out.push_back(lower(c));
   }
   if (out.size() < 2 || out.size() > 3) return "";
-  for (const Iso3& code : ISO3_TO_2) {
-    if (out == code.three) return code.two;
-  }
-  return out;
+  const auto* code =
+      std::find_if(std::begin(ISO3_TO_2), std::end(ISO3_TO_2), [&out](const Iso3& c) { return out == c.three; });
+  return code != std::end(ISO3_TO_2) ? code->two : out;
 }
 
 std::string sourceOf(const std::string& ifoText, const std::string& folderName) {

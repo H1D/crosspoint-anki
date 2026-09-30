@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 
 namespace DictStemmer {
 namespace {
@@ -315,6 +316,18 @@ bool endsWith(const std::string& s, const char* suffix) {
 
 std::string dropSuffix(const std::string& s, const size_t len) { return s.substr(0, s.size() - len); }
 
+// Longest first, so the first match is the whole ending.
+constexpr const char* DIMINUTIVES[] = {"etjes", "etje", "tjes", "tje", "pjes", "pje", "jes", "je"};
+constexpr const char* WEAK_PAST[] = {"ten", "den", "te", "de"};
+
+// The first of `suffixes` that `s` ends with, nullptr for none.
+template <size_t N>
+const char* firstSuffix(const std::string& s, const char* const (&suffixes)[N]) {
+  const auto* it =
+      std::find_if(std::begin(suffixes), std::end(suffixes), [&s](const char* suffix) { return endsWith(s, suffix); });
+  return it != std::end(suffixes) ? *it : nullptr;
+}
+
 // "katt" -> "kat": a doubled final consonant after a short vowel.
 std::string undouble(const std::string& s) {
   const size_t n = s.size();
@@ -429,13 +442,10 @@ void dutchVariants(const std::string& w, Candidates& c) {
   if (endsWith(w, "er")) addNounBase(c, dropSuffix(w, 2));
   if (endsWith(w, "e")) addNounBase(c, dropSuffix(w, 1));
   // Diminutives: huisje, boompje, balletje, mannetjes.
-  for (const char* dim : {"etjes", "etje", "tjes", "tje", "pjes", "pje", "jes", "je"}) {
-    if (endsWith(w, dim)) {
-      const std::string base = dropSuffix(w, strlen(dim));
-      c.add(undouble(base));
-      c.add(base);
-      break;
-    }
+  if (const char* dim = firstSuffix(w, DIMINUTIVES)) {
+    const std::string base = dropSuffix(w, strlen(dim));
+    c.add(undouble(base));
+    c.add(base);
   }
   // Verbs. Past participle ge-...-t/-d (gewerkt) and strong ge-...-en (gelopen).
   if (w.size() > 4 && w.compare(0, 2, "ge") == 0) {
@@ -444,12 +454,7 @@ void dutchVariants(const std::string& w, Candidates& c) {
     if (endsWith(rest, "t") || endsWith(rest, "d")) addInfinitive(c, dropSuffix(rest, 1));
   }
   // Weak past: werkte(n), woonde(n).
-  for (const char* past : {"ten", "den", "te", "de"}) {
-    if (endsWith(w, past)) {
-      addInfinitive(c, dropSuffix(w, strlen(past)));
-      break;
-    }
-  }
+  if (const char* past = firstSuffix(w, WEAK_PAST)) addInfinitive(c, dropSuffix(w, strlen(past)));
   // Present: the stem itself (ik loop, zit) before stem + t (hij loopt).
   addInfinitive(c, w);
   if (endsWith(w, "t")) addInfinitive(c, dropSuffix(w, 1));
@@ -478,10 +483,9 @@ void englishVariants(const std::string& word, Candidates& c) {
 
 const char* irregularLemma(const std::string& word, const std::string& lang) {
   if (lang != "nl") return nullptr;
-  for (const Irregular& entry : DUTCH_IRREGULAR) {
-    if (word == entry.form) return entry.lemma;
-  }
-  return nullptr;
+  const auto* entry = std::find_if(std::begin(DUTCH_IRREGULAR), std::end(DUTCH_IRREGULAR),
+                                   [&word](const Irregular& e) { return word == e.form; });
+  return entry != std::end(DUTCH_IRREGULAR) ? entry->lemma : nullptr;
 }
 
 void variants(const std::string& word, const std::string& lang, std::vector<std::string>& out) {

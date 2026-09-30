@@ -139,13 +139,12 @@ std::string pickForBook(const std::string& bookLanguage, const char* selected) {
 
   std::vector<DictionaryEntry> all;
   discover(all);
-  for (const DictionaryEntry& entry : all) {
-    if (entry.name != selected && languageOf(entry.name.c_str()) == lang) {
-      LOG_DBG("DREG", "Book language %s: using %s instead of %s", lang.c_str(), entry.name.c_str(), selected);
-      return entry.name;
-    }
-  }
-  return selected;
+  const auto match = std::find_if(all.begin(), all.end(), [&](const DictionaryEntry& entry) {
+    return entry.name != selected && languageOf(entry.name.c_str()) == lang;
+  });
+  if (match == all.end()) return selected;
+  LOG_DBG("DREG", "Book language %s: using %s instead of %s", lang.c_str(), match->name.c_str(), selected);
+  return match->name;
 }
 
 }  // namespace DictionaryRegistry

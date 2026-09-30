@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
+#include <numeric>
 #include <string_view>
 
 namespace WikDict {
@@ -303,8 +304,8 @@ std::string shortTranslation(const std::string& html, const size_t maxTerms) {
     std::string t = stripStress(term);
     if (std::find(picked.begin(), picked.end(), t) == picked.end()) picked.push_back(std::move(t));
   };
-  size_t maxSenses = 0;
-  for (const Entry& e : entries) maxSenses = std::max(maxSenses, e.senses.size());
+  const size_t maxSenses = std::accumulate(entries.begin(), entries.end(), size_t{0},
+                                           [](size_t m, const Entry& e) { return std::max(m, e.senses.size()); });
   for (size_t rank = 0; rank < maxSenses; rank++) {
     for (const Entry& e : entries) {
       if (rank < e.senses.size() && !e.senses[rank].terms.empty()) pick(e.senses[rank].terms.front());
