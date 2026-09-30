@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "activities/Activity.h"
+#include "anki/AnkiAddNoteActivity.h"
 #include "util/Dictionary.h"
 
 // Word selection over the current reader page: Left/Right step through words
@@ -15,10 +16,12 @@
 // to the reader. On touch devices a touch-down moves the highlight and a tap
 // on a word acts on it directly.
 //
-// Mode::Lookup opens DictionaryDefinitionActivity for the word. Mode::AnkiAdd
-// builds the sentence around the word from the page, looks up a translation
-// when a dictionary is given (none required), and opens AnkiAddNoteActivity
-// to queue the note. `dictionaryName` is the folder picked for the book
+// The picked word opens DictionaryDefinitionActivity. With an Anki account
+// enabled, that view also offers "Add to Anki" with a note draft: the word,
+// the sentence around it on the page, and the dictionary's translation.
+// Mode::AnkiAdd works without a dictionary: with none, or when the lookup
+// misses, it opens AnkiAddNoteActivity directly with an empty translation.
+// `dictionaryName` is the folder picked for the book
 // (DictionaryRegistry::pickForBook), "" for none.
 class DictionaryWordSelectActivity final : public Activity {
  public:
@@ -60,10 +63,14 @@ class DictionaryWordSelectActivity final : public Activity {
   int closestInRow(uint16_t row, int centerX) const;
   int wordAt(int x, int y) const;
   void moveVertical(int direction);
-  // Confirm / tap on the selected word: performLookup() or performAnkiAdd().
+  // Confirm / tap on the selected word.
   void activateSelected();
-  void performLookup();
-  void performAnkiAdd();
+  // `anki`: the definition view offers "Add to Anki".
+  void performLookup(bool anki);
+  // Draft for the selected word; `definition` (raw, as looked up) supplies
+  // the translation, `headword` the dictionary form when it differs.
+  AnkiNoteDraft noteDraft(const std::string* definition, std::string headword) const;
+  void openAnkiAdd(AnkiNoteDraft draft);
   // Opens the dictionary once per activity and picks the busy popup text.
   void openDictionaryOnce();
   // Builds the index if needed, then looks `token` up. True on a hit; the

@@ -14,6 +14,7 @@
 
 #include "CrossPointSettings.h"
 #include "DictionaryDefinitionActivity.h"
+#include "anki/AnkiAccountStore.h"
 #include "anki/AnkiAddNoteActivity.h"
 #include "components/UITheme.h"
 #include "util/HtmlToPlainText.h"
@@ -26,6 +27,9 @@ constexpr unsigned long WORD_REPEAT_START_MS = 500;
 constexpr unsigned long WORD_REPEAT_INTERVAL_MS = 500;
 // Longest dictionary definition kept as a note's Back field.
 constexpr size_t MAX_TRANSLATION_BYTES = 600;
+// Definition prefix the plain-text Back field is made from: markup included,
+// ample for 600 bytes of text, and a bounded copy even for a 64KB entry.
+constexpr size_t MAX_TRANSLATION_SOURCE_BYTES = 8 * MAX_TRANSLATION_BYTES;
 
 // A token is selectable when it has an ASCII alphanumeric or a non-ASCII
 // codepoint outside U+2000-U+206F (dashes, bullets and other General
@@ -48,9 +52,11 @@ void indexBuildYield(void*) { vTaskDelay(1); }
 
 // Plain-text note field from a StarDict definition: HTML stripped, whitespace
 // runs collapsed (wrappedText only breaks on spaces), cut at a UTF-8 boundary.
-std::string definitionToTranslation(std::string definition) {
-  std::replace(definition.begin(), definition.end(), '\0', '\n');  // multi-type separators
-  std::string text = htmlToPlainText(definition);
+std::string definitionToTranslation(const std::string& definition) {
+  std::string source = definition.substr(0, MAX_TRANSLATION_SOURCE_BYTES);
+  std::replace(source.begin(), source.end(), '\0', '\n');  // multi-type separators
+  std::string text = htmlToPlainText(source);
+  source = std::string();
   std::string out;
   out.reserve(std::min(text.size(), MAX_TRANSLATION_BYTES));
   bool pendingSpace = false;
@@ -189,10 +195,12 @@ void DictionaryWordSelectActivity::moveVertical(const int direction) {
 }
 
 void DictionaryWordSelectActivity::activateSelected() {
-  if (mode == Mode::AnkiAdd) {
-    performAnkiAdd();
-  } else {
-    performLookup();
+  // With an Anki account enabled the definition view offers "Add to Anki".
+  const bool anki = mode == Mode::AnkiAdd || ANKI_STORE.hasEnabledAccounts();
+  if (!dictionaryName.empty()) {
+    performLookup(anki);
+  } else if (anki) {
+    openAnkiAdd(noteDraft(nullptr, {}));
   }
 }
 
@@ -219,7 +227,7 @@ bool DictionaryWordSelectActivity::lookupWord(const char* token, std::string& de
   return dictReady && dict.lookup(token, definition, headword, &lastLookupResult);
 }
 
-void DictionaryWordSelectActivity::performLookup() {
+void DictionaryWordSelectActivity::performLookup(const bool anki) {
   popup = Popup::Busy;
   openDictionaryOnce();
   requestUpdateAndWait();  // paint the page + busy popup before blocking on SD
@@ -228,16 +236,39 @@ void DictionaryWordSelectActivity::performLookup() {
   std::string headword;
   if (lookupWord(words[selected].text, definition, headword)) {
     popup = Popup::None;
+    AnkiNoteDraft draft;
+    if (anki) draft = noteDraft(&definition, headword);
     // WikDict entries read better as "gloss — translations" per sense than
     // laid out as delivered (nested lists, IPA the fonts cannot draw).
     if (dict.definitionsAreHtml()) {
       std::string compact = WikDict::compactHtml(definition);
       if (!compact.empty()) definition = std::move(compact);
     }
-    startActivityForResult(
-        std::make_unique<DictionaryDefinitionActivity>(renderer, mappedInput, std::move(headword),
-                                                       std::move(definition), dict.definitionsAreHtml()),
-        [this](const ActivityResult&) { requestUpdate(); });
+    auto view = makeUniqueNoThrow<DictionaryDefinitionActivity>(
+        renderer, mappedInput, std::move(headword), std::move(definition), dict.definitionsAreHtml(), std::move(draft));
+    if (!view) {
+      LOG_ERR("DICT", "OOM: DictionaryDefinitionActivity");
+      popup = Popup::Error;
+      popupMsg = StrId::STR_DICT_LOW_MEMORY;
+      popupTime = millis();
+      requestUpdate();
+      return;
+    }
+    // A queued note ends the word pick too; Back returns here to pick another word.
+    startActivityForResult(std::move(view), [this](const ActivityResult& result) {
+      if (!result.isCancelled) {
+        finish();
+        return;
+      }
+      requestUpdate();
+    });
+    return;
+  }
+  // Adding to Anki does not need the dictionary: a miss or a failure leaves
+  // the Back field to fill in on the phone.
+  if (mode == Mode::AnkiAdd) {
+    popup = Popup::None;
+    openAnkiAdd(noteDraft(nullptr, {}));
     return;
   }
   // Name the failure: a genuine miss is "Not found"; a word that WAS found but
@@ -284,13 +315,14 @@ void DictionaryWordSelectActivity::performLookup() {
   requestUpdate();
 }
 
-void DictionaryWordSelectActivity::performAnkiAdd() {
-  std::string noteWord = ankinote::cleanWord(words[selected].text);
-  if (noteWord.empty()) return;
+AnkiNoteDraft DictionaryWordSelectActivity::noteDraft(const std::string* definition, std::string headword) const {
+  AnkiNoteDraft draft;
+  draft.word = ankinote::cleanWord(words[selected].text);
+  if (draft.word.empty()) return draft;
+  draft.bookTitle = bookTitle;
 
   // Sentence context from the page words. A page holds a few hundred short
-  // tokens (~2KB of copies), freed before the modal opens.
-  std::string sentence;
+  // tokens (~2KB of copies), freed before the draft is returned.
   {
     // Stay inside the word's paragraph: a row gap wider than the page's
     // normal line pitch marks a heading or paragraph break.
@@ -311,30 +343,24 @@ void DictionaryWordSelectActivity::performAnkiAdd() {
     std::vector<std::string> tokens;
     tokens.reserve(last - first + 1);
     for (size_t i = first; i <= last; i++) tokens.emplace_back(words[i].text);
-    sentence = ankinote::sentenceAround(tokens, static_cast<size_t>(selected) - first);
+    draft.sentence = ankinote::sentenceAround(tokens, static_cast<size_t>(selected) - first);
   }
 
-  // Translation is best effort: a configured dictionary that misses, fails or
-  // is absent leaves the Back field empty to fill in on the phone.
-  std::string translation;
-  std::string headword;
-  if (!dictionaryName.empty()) {
-    popup = Popup::Busy;
-    openDictionaryOnce();
-    requestUpdateAndWait();
-    std::string definition;
-    if (lookupWord(noteWord.c_str(), definition, headword)) {
-      // Just the translated words when the HTML has WikDict's layout, else the whole entry as text.
-      if (dict.definitionsAreHtml()) translation = WikDict::shortTranslation(definition);
-      if (translation.empty()) translation = definitionToTranslation(std::move(definition));
-    }
-    // Only a different word is worth showing: "Walk" for "walk" is not.
-    if (Dictionary::cleanWord(headword.c_str()) == Dictionary::cleanWord(noteWord.c_str())) headword.clear();
-    popup = Popup::None;
+  if (definition) {
+    // Just the translated words when the HTML has WikDict's layout, else the whole entry as text.
+    if (dict.definitionsAreHtml()) draft.translation = WikDict::shortTranslation(*definition);
+    if (draft.translation.empty()) draft.translation = definitionToTranslation(*definition);
   }
+  // Only a different word is worth showing: "Walk" for "walk" is not.
+  if (Dictionary::cleanWord(headword.c_str()) != Dictionary::cleanWord(draft.word.c_str())) {
+    draft.headword = std::move(headword);
+  }
+  return draft;
+}
 
-  auto modal = makeUniqueNoThrow<AnkiAddNoteActivity>(renderer, mappedInput, std::move(noteWord), std::move(headword),
-                                                      std::move(sentence), std::move(translation), bookTitle);
+void DictionaryWordSelectActivity::openAnkiAdd(AnkiNoteDraft draft) {
+  if (draft.word.empty()) return;
+  auto modal = makeUniqueNoThrow<AnkiAddNoteActivity>(renderer, mappedInput, std::move(draft));
   if (!modal) {
     LOG_ERR("DICT", "OOM: AnkiAddNoteActivity");
     popup = Popup::Error;

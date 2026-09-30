@@ -3,12 +3,16 @@
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <I18n.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 
 #include "CrossPointSettings.h"
+#include "activities/ActivityResult.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 #include "util/DictHtmlPages.h"
@@ -30,10 +34,18 @@ constexpr int SIDE_PADDING = 20;
 // path, which holds no per-page copies.
 constexpr size_t MAX_STYLED_HTML_BYTES = 16 * 1024;
 
+// "Add to Anki" button height; finger-sized on touch boards.
+constexpr int ADD_BUTTON_HEIGHT = 48;
+constexpr int ADD_BUTTON_RADIUS = 8;
+
 }  // namespace
 
 void DictionaryDefinitionActivity::onEnter() {
   Activity::onEnter();
+  // Only a queued note reports success (the word picker then closes too).
+  ActivityResult cancelled;
+  cancelled.isCancelled = true;
+  setResult(std::move(cancelled));
   // Normalize StarDict multi-type separators so the wrap loop and the
   // C-string font APIs below both see the whole definition.
   std::replace(definition.begin(), definition.end(), '\0', '\n');
@@ -59,9 +71,37 @@ DictionaryDefinitionActivity::BodyArea DictionaryDefinitionActivity::bodyArea() 
   const bool isInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
   const int hintGutterWidth = isLandscape ? metrics.sideButtonHintsWidth : 0;
   const int topArea = (isInverted ? metrics.buttonHintsHeight : 0) + metrics.topPadding + metrics.headerHeight;
-  const int bottomArea = metrics.buttonHintsHeight + metrics.verticalSpacing;
+  const int addBand = offersAnkiAdd() ? ADD_BUTTON_HEIGHT + metrics.verticalSpacing : 0;
+  const int bottomArea = metrics.buttonHintsHeight + metrics.verticalSpacing + addBand;
   return {renderer.getScreenWidth() - hintGutterWidth - 2 * SIDE_PADDING,
           renderer.getScreenHeight() - topArea - bottomArea};
+}
+
+DictionaryDefinitionActivity::ButtonRect DictionaryDefinitionActivity::addButtonRect() const {
+  const auto& metrics = UITheme::getInstance().getMetrics();
+  const auto orientation = renderer.getOrientation();
+  const bool isInverted = orientation == GfxRenderer::Orientation::PortraitInverted;
+  const int x =
+      (orientation == GfxRenderer::Orientation::LandscapeClockwise ? metrics.sideButtonHintsWidth : 0) + SIDE_PADDING;
+  const int bodyTop = (isInverted ? metrics.buttonHintsHeight : 0) + metrics.topPadding + metrics.headerHeight;
+  const BodyArea body = bodyArea();
+  return {x, bodyTop + body.height + metrics.verticalSpacing, body.width, ADD_BUTTON_HEIGHT};
+}
+
+void DictionaryDefinitionActivity::openAnkiAdd() {
+  auto add = makeUniqueNoThrow<AnkiAddNoteActivity>(renderer, mappedInput, ankiDraft);
+  if (!add) {
+    LOG_ERR("DICT", "OOM: AnkiAddNoteActivity");
+    return;
+  }
+  startActivityForResult(std::move(add), [this](const ActivityResult& result) {
+    if (!result.isCancelled) {
+      setResult(ActivityResult{});
+      finish();
+      return;
+    }
+    requestUpdate();
+  });
 }
 
 // Styled path: lay the HTML definition out through the EPUB chapter parser
@@ -202,12 +242,25 @@ void DictionaryDefinitionActivity::loop() {
     finish();
     return;
   }
+  if (mappedInput.wasPressed(MappedInputManager::Button::Confirm)) confirmPressedHere = true;
+  if (offersAnkiAdd() && confirmPressedHere && mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+    confirmPressedHere = false;
+    openAnkiAdd();
+    return;
+  }
 
   // Same tap zones as the reader page turns: left third = previous page,
-  // the rest = next. Back is the usual left-edge swipe.
+  // the rest = next. Back is the header button or the left-edge swipe.
   int tx = 0;
   int ty = 0;
   if (mappedInput.wasScreenTapped(tx, ty)) {
+    if (offersAnkiAdd()) {
+      const ButtonRect add = addButtonRect();
+      if (tx >= add.x && tx < add.x + add.width && ty >= add.y && ty < add.y + add.height) {
+        openAnkiAdd();
+        return;
+      }
+    }
     if (tx < renderer.getScreenWidth() / 3) {
       if (currentPage > 0) {
         currentPage--;
@@ -270,15 +323,11 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   const int contentWidth = renderer.getScreenWidth() - hintGutterWidth;
   const int contentY = isInverted ? metrics.buttonHintsHeight : 0;
 
-  // Header: matched headword left, page counter right.
-  const int headerY = contentY + metrics.topPadding + 10;
-  renderer.drawText(UI_12_FONT_ID, contentX + SIDE_PADDING, headerY, headword.c_str(), true, EpdFontFamily::BOLD);
-  if (totalPages > 1) {
-    char counter[16];
-    snprintf(counter, sizeof(counter), "%d/%d", currentPage + 1, totalPages);
-    const int counterWidth = renderer.getTextWidth(UI_10_FONT_ID, counter);
-    renderer.drawText(UI_10_FONT_ID, contentX + contentWidth - SIDE_PADDING - counterWidth, headerY, counter);
-  }
+  // Header: matched headword (after the back button on touch boards), page counter right.
+  char counter[16] = {};
+  if (totalPages > 1) snprintf(counter, sizeof(counter), "%d/%d", currentPage + 1, totalPages);
+  GUI.drawHeader(renderer, Rect{contentX, contentY + metrics.topPadding, contentWidth, metrics.headerHeight},
+                 headword.c_str(), totalPages > 1 ? counter : nullptr);
 
   // Body: two-pass draw inside a prewarm scope (same pattern as the reader's
   // renderContents) so SD-card font glyphs load from SD in one batch instead
@@ -291,8 +340,17 @@ void DictionaryDefinitionActivity::render(RenderLock&&) {
   scope.endScanAndPrewarm();
   drawBody(fontId, contentX + SIDE_PADDING, bodyStartY);
 
-  const auto labels =
-      mappedInput.mapLabels(tr(STR_BACK), "", (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
+  if (offersAnkiAdd()) {
+    const ButtonRect add = addButtonRect();
+    const char* label = tr(STR_ANKI_ADD_TO_ANKI);
+    renderer.drawRoundedRect(add.x, add.y, add.width, add.height, 2, ADD_BUTTON_RADIUS, true);
+    const int labelWidth = renderer.getTextWidth(UI_12_FONT_ID, label, EpdFontFamily::BOLD);
+    const int labelY = add.y + (add.height - renderer.getLineHeight(UI_12_FONT_ID)) / 2;
+    renderer.drawText(UI_12_FONT_ID, add.x + (add.width - labelWidth) / 2, labelY, label, true, EpdFontFamily::BOLD);
+  }
+
+  const auto labels = mappedInput.mapLabels(tr(STR_BACK), offersAnkiAdd() ? tr(STR_ANKI_ADD_TO_ANKI) : "",
+                                            (currentPage > 0 ? "<" : ""), (currentPage + 1 < totalPages ? ">" : ""));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

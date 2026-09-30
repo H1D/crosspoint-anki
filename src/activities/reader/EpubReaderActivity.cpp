@@ -344,7 +344,7 @@ void EpubReaderActivity::openDictionaryWordSelect(const int touchX, const int to
 
   auto activity = makeUniqueNoThrow<DictionaryWordSelectActivity>(
       renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop, dictionaryForBook(),
-      DictionaryWordSelectActivity::Mode::Lookup, std::string{}, touchX, touchY);
+      DictionaryWordSelectActivity::Mode::Lookup, epub ? epub->getTitle() : std::string{}, touchX, touchY);
   if (!activity) {
     LOG_ERR("ERS", "OOM: DictionaryWordSelectActivity");
     return;
