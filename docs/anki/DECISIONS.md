@@ -260,3 +260,62 @@ whole afterwards.
   persistent default is the account's "Deck for new words".
 - A successful Add closes word selection too and returns to the page; Back
   from the add screen returns to word selection to pick another word.
+- **Rows are accounts only (2026-09-30, reversed).** The Deck rows made the
+  screen twice as long as the choice it offers. Each account is one checkbox
+  row with its target deck as the subtitle; a long press on the row (Confirm
+  hold or touch) opens the deck list and ticks the account, Left/Right still
+  cycle it. The note band above the list is one line, "word — translation";
+  the sentence is not shown (it is still sent).
+- **Back = the translations only (2026-09-30).** A WikDict entry holds IPA,
+  part of speech, English sense glosses and the translations; flattening all
+  of it made the Back field unreadable. `WikDict::shortTranslation`
+  (src/util/WikDict) keeps the translations only: up to 6 distinct terms,
+  the first of each sense before the rest, senses of several entries (noun,
+  verb) taken in turn, stress accents dropped. Dictionaries in any other
+  layout still get the whole entry as plain text, capped at 600 bytes.
+- **Front = the dictionary form (2026-09-30).** When the lookup lands on a
+  different headword ("kwam" -> "komen", "walked" -> "walk"), the card's
+  top line is the headword and the sentence bolds the word as written; the
+  add screen shows "kwam (komen) — ...". Two forms of one word then make one
+  note instead of two.
+- **Touch long-press without Anki (2026-09-30).** With no enabled account, a
+  long press on a word opens the dictionary picker on it instead of doing
+  nothing (when a dictionary is selected).
+
+## Dictionaries (2026-09-30)
+
+- **One dictionary per book language, no new setting.** The Settings choice
+  stays the default; a book whose EPUB language has a matching dictionary
+  on the card uses that one instead (`DictionaryRegistry::pickForBook`,
+  cached per book in the reader). "None" still disables lookups everywhere,
+  so there is no separate on/off. Rejected: trying every dictionary in turn
+  until one hits, because short Dutch words ("is", "hem", "was") exist in
+  English dictionaries too and would get the wrong language's entry.
+- **Dictionary language from the .ifo or its name.** StarDict has no
+  standard language key. Order: a `lang=` line (first code = headword
+  language), then a trailing "(xx-yy)" in `bookname` (every WikDict/FreeDict
+  file), then "xx-yy" at the end of the folder name. A dictionary with none
+  of these only serves as the default.
+- **Stemming per language.** The English suffix rules stay for every
+  language but Dutch (their behaviour before this change). Dutch gets its own
+  rules, spelling-aware (bomen -> boom, not bom; zegt -> zeggen, not zegen)
+  and a table of ~290 irregular verb forms in flash (`DictStemmer`). The
+  irregular form's verb comes first and the word's own entry, if any,
+  follows: in running text "was" and "lag" are far more often verbs, but
+  "roken" (to smoke) and "vroeg" (early) are words of their own. The card
+  takes the verb as its headword.
+  On the Dutch "Vadertje Langbeen" (45k words) against WikDict nl-ru the
+  hit rate went from 56% to 71%; most remaining misses are pronouns and
+  1920s spellings the 14k-word dictionary lacks. Rejected: generating a .syn
+  file from Wiktionary inflection data. Better coverage, but it works only
+  for dictionaries rebuilt with a script, not for downloaded ones.
+- **Every entry of a headword.** WikDict stores noun and verb as separate
+  .idx entries with the same headword; the lookup used to read only the
+  first ("run" gave only noun senses). It now reads up to 4 adjacent entries
+  and appends them.
+- **Compact WikDict view.** The definition screen lays WikDict entries out
+  as "part of speech", then "1. *gloss* — translations" per sense, without
+  the IPA line (the reader fonts have no IPA glyphs, it drew as boxes). The
+  delivered HTML nests gloss and translation lists in a way the EPUB layout
+  engine ran together ("distanceближний"). Other HTML dictionaries are shown
+  as before.
