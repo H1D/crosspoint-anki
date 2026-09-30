@@ -19,9 +19,12 @@ bool parseLine(const std::string& line, AnkiJournal::Entry& out) {
   };
   cb.onNumber = [&](const std::string& v) {
     const int64_t n = ankijson::toInt64(v);
-    if (key == "card_id") out.cardId = n;
-    else if (key == "ease") out.ease = static_cast<uint8_t>(n);
-    else if (key == "answered_at") out.answeredAt = n;
+    if (key == "card_id")
+      out.cardId = n;
+    else if (key == "ease")
+      out.ease = static_cast<uint8_t>(n);
+    else if (key == "answered_at")
+      out.answeredAt = n;
   };
   ankijson::Reader reader(std::move(cb));
   reader.feed(line);
