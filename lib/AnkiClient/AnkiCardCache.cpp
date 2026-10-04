@@ -17,11 +17,18 @@ std::string AnkiCardCache::toLine(const AnkiCard& c) {
     if (i) line.push_back(',');
     ankijson::appendQuoted(line, c.next[i]);
   }
-  line += "],\"media\":" + std::to_string(static_cast<int>(c.mediaCount)) + "}\n";
+  line += "],\"media\":" + std::to_string(static_cast<int>(c.mediaCount));
+  if (!c.typeAnswer.empty()) {
+    line += ",\"type_answer\":";
+    ankijson::appendQuoted(line, c.typeAnswer);
+    if (c.typeIgnoreAccents) line += ",\"type_nc\":true";
+  }
+  line += "}\n";
   return line;
 }
 
 bool AnkiCardCache::parseLine(const std::string& line, AnkiCard& out) {
+  out = AnkiCard();  // optional keys must not carry over from a previous card
   std::string key;
   int nextIndex = -1;
   ankijson::Reader::Callbacks cb;
@@ -44,6 +51,11 @@ bool AnkiCardCache::parseLine(const std::string& line, AnkiCard& out) {
       out.q = v;
     else if (key == "a")
       out.a = v;
+    else if (key == "type_answer")
+      out.typeAnswer = v;
+  };
+  cb.onBool = [&](const bool v) {
+    if (key == "type_nc") out.typeIgnoreAccents = v;
   };
   cb.onNumber = [&](const std::string& v) {
     if (key == "card_id")

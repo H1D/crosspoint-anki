@@ -53,6 +53,9 @@ class AnkiReviewActivity final : public Activity {
   void loadCurrent();
   void flip();
   void grade(uint8_t ease);
+  void openTypeKeyboard();
+  bool typeBoxContains(int y) const;
+  std::vector<ankimarkup::Run> withTypeComparison(std::vector<ankimarkup::Run> answer) const;
   void onBack();
   void startSync();
   void layout();
@@ -76,6 +79,13 @@ class AnkiReviewActivity final : public Activity {
   std::vector<Segment> segments;
   int lineCount = 0;
   int ruleLine = -1;  // line index of the question/answer separator, -1 on the front
+  // Type-in-the-answer cards: the question's first "[[type:...]]" run (drawn
+  // as the box to type in; -1 for other cards), the lines that box spans on
+  // the front, and the answer typed so far.
+  int typeRun = -1;
+  int typeLineFirst = -1;
+  int typeLineLast = -1;
+  std::string typed;
   int currentPage = 0;
   int totalPages = 1;
   int linesPerPage = 1;

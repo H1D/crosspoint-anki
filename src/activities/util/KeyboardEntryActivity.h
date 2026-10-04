@@ -33,6 +33,10 @@ class KeyboardEntryActivity : public Activity {
   void render(RenderLock&&) override;
   bool preventAutoSleep() override { return true; }
 
+  // Opens on an enabled layout for the script `sample` is written in (e.g. a
+  // Cyrillic one for a Russian answer). Call before the activity starts.
+  void preferScriptOf(std::string sample) { scriptSample = std::move(sample); }
+
  private:
   std::string title;
   std::string text;
@@ -42,10 +46,11 @@ class KeyboardEntryActivity : public Activity {
 
   ButtonNavigator buttonNavigator;
 
-  // Keyboard layers. The letter/symbol layers come from the SDK's builtin
-  // layouts (with the always-visible number row); the URL layers are
-  // app-defined tables in the .cpp.
-  freeink::ui::KeyboardLayoutId layoutId = freeink::ui::KeyboardLayoutId::QwertyEn;
+  // Keyboard layers. The letter/symbol layers come from keyboard_layouts
+  // (SDK builtin layouts with the always-visible number row, or the app's
+  // European tables); the URL layers are app-defined tables in the .cpp.
+  uint8_t layoutIndex = 0;  // keyboard_layouts::ALL index
+  std::string scriptSample;
   // Asks the SDK for a layout variant with the language key. Only the Latin
   // layouts honour it; the Cyrillic, Hebrew and Arabic tables carry the key
   // either way.

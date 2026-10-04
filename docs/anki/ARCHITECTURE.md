@@ -14,6 +14,7 @@ lib/AnkiClient/          host-testable core (no Arduino types, no ArduinoJson)
   AnkiJson.*             streaming JSON reader + string quoting
   AnkiMarkup.*           AnkiDo text markup -> styled runs; bidi-control stripping
   AnkiHtml.*             Anki card HTML -> the same markup (AnkiConnect path)
+  AnkiTypeAnswer.*       type-in cards: expected answer from a field/cloze, typed-vs-expected diff runs
   AnkiJournal.*          pending reviews (reviews.jsonl)
   AnkiNoteQueue.*        pending add-word notes (notes.jsonl) + ankinote:: builders
   AnkiCardCache.*        cached queue (cards.jsonl + cache.json)

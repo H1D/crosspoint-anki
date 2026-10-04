@@ -9,6 +9,7 @@
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
 #include "AnkiSyncEngine.h"
+#include "AnkiTypeAnswer.h"
 
 namespace {
 
@@ -44,6 +45,37 @@ void appendDeckTerm(std::string& out, const std::string& deck) {
 }
 
 uint16_t saturate16(const int64_t v) { return static_cast<uint16_t>(std::clamp<int64_t>(v, 0, 65535)); }
+
+// Field values longer than this are not kept while a card streams in.
+constexpr size_t MAX_FIELD_BYTES = 2048;
+
+struct NoteField {
+  std::string name;
+  std::string value;
+  bool kept;  // false: over MAX_FIELD_BYTES, value dropped
+};
+
+// Fills card.typeAnswer from the note field a "[[type:Field]]" marker in the
+// question names. A known field with nothing to type drops the markers, as
+// Anki does; an unknown or oversized one leaves them (typed text is then
+// shown uncompared).
+void resolveTypeAnswer(AnkiCard& card, const std::vector<NoteField>& fields, const int ord) {
+  ankitype::Spec spec;
+  if (!ankitype::findSpec(card.q, spec)) return;
+  const auto field =
+      std::find_if(fields.begin(), fields.end(), [&spec](const NoteField& f) { return f.name == spec.field; });
+  if (field == fields.end() || !field->kept) return;
+  card.typeAnswer = ankitype::expectedFromField(field->value, spec, ord);
+  if (card.typeAnswer.size() > ankitype::MAX_ANSWER_BYTES) {
+    card.typeAnswer.clear();
+    return;
+  }
+  card.typeIgnoreAccents = spec.ignoreAccents;
+  if (card.typeAnswer.empty()) {
+    card.q = ankitype::stripMarkers(card.q);
+    card.a = ankitype::stripMarkers(card.a);
+  }
+}
 
 }  // namespace
 
@@ -358,14 +390,22 @@ bool AnkiConnectClient::fetchQueue(const AnkiAccount& account, AnkiSyncResult& r
     }
     params += "]}";
 
-    // cardsInfo: [{"cardId":..,"question":<html>,"answer":<html>,"deckName":..,"queue":n,...}]
-    // Each card is converted and written as soon as its object closes.
+    // cardsInfo: [{"cardId":..,"question":<html>,"answer":<html>,"deckName":..,"queue":n,
+    //              "ord":n,"fields":{"<name>":{"value":<html>,"order":n},..},...}]
+    // Each card is converted and written as soon as its object closes. Field
+    // values are only kept for that card, to resolve a "[[type:Field]]" answer.
     AnkiCard card;
     std::string key;
     int depth = 0;
     int64_t queue = 0;
+    int64_t ord = 0;
+    std::string fieldName;
+    std::vector<NoteField> fields;
     ankijson::Reader::Callbacks cb;
-    cb.onKey = [&](const std::string& k) { key = k; };
+    cb.onKey = [&](const std::string& k) {
+      key = k;
+      if (depth == 3) fieldName = k;
+    };
     cb.onArrayStart = [&]() { depth++; };
     cb.onArrayEnd = [&]() { depth--; };
     cb.onObjectStart = [&]() {
@@ -373,12 +413,15 @@ bool AnkiConnectClient::fetchQueue(const AnkiAccount& account, AnkiSyncResult& r
       if (depth == 2) {
         card = AnkiCard();
         queue = 0;
+        ord = 0;
+        fields.clear();
       }
     };
     cb.onObjectEnd = [&]() {
       if (depth == 2 && card.cardId != 0 && !writeFailed) {
         // Anki queues: 0 new, 1 learning, 2 review, 3 day-learning.
         card.kind = queue == 0 ? "new" : (queue == 1 || queue == 3) ? "learning" : "due";
+        resolveTypeAnswer(card, fields, static_cast<int>(ord));
         const std::string line = AnkiCardCache::toLine(card);
         if (out->write(line) != line.size())
           writeFailed = true;
@@ -389,6 +432,11 @@ bool AnkiConnectClient::fetchQueue(const AnkiAccount& account, AnkiSyncResult& r
       depth--;
     };
     cb.onString = [&](const std::string& v) {
+      if (depth == 4 && key == "value") {
+        const bool kept = v.size() <= MAX_FIELD_BYTES;
+        fields.push_back({fieldName, kept ? v : std::string(), kept});
+        return;
+      }
       if (depth != 2) return;
       unsigned images = 0;
       if (key == "question") {
@@ -409,6 +457,8 @@ bool AnkiConnectClient::fetchQueue(const AnkiAccount& account, AnkiSyncResult& r
         card.cardId = ankijson::toInt64(v);
       else if (key == "queue")
         queue = ankijson::toInt64(v);
+      else if (key == "ord")
+        ord = ankijson::toInt64(v);
     };
     const Call c = call(account, "cardsInfo", params, std::move(cb));
     if (!c.ok) {

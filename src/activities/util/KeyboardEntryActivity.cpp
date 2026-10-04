@@ -118,7 +118,9 @@ void KeyboardEntryActivity::onEnter() {
   cursorPos = text.length();
   // URL layers are EN-arranged app tables; everything else opens on the UI
   // language's layout, or on an enabled one if the user switched that off.
-  layoutId = inputType == InputType::Url ? fui::KeyboardLayoutId::QwertyEn : keyboard_layouts::startingLayout();
+  layoutIndex = inputType == InputType::Url
+                    ? keyboard_layouts::ENGLISH
+                    : keyboard_layouts::forScriptOf(scriptSample.c_str(), keyboard_layouts::startingLayout());
   // The key only earns its slot in the bottom row with somewhere to go.
   const uint16_t enabledLayouts = keyboard_layouts::enabled();
   showLangKey = (enabledLayouts & (enabledLayouts - 1)) != 0;
@@ -147,12 +149,11 @@ void KeyboardEntryActivity::onEnter() {
 void KeyboardEntryActivity::onExit() { Activity::onExit(); }
 
 const fui::KeyboardLayout& KeyboardEntryActivity::currentLayout() const {
-  if (symbols) return fui::builtinKeyboardLayout(layoutId, shifted, true);
-  if (inputType == InputType::Url) {
+  if (inputType == InputType::Url && !symbols) {
     if (urlPanel) return URL_SNIPPET_LAYOUT;
     return shifted ? URL_SHIFT_LAYOUT : URL_LAYOUT;
   }
-  return fui::builtinKeyboardLayout(layoutId, shifted, false, /*numberRow=*/true, showLangKey);
+  return keyboard_layouts::layer(layoutIndex, shifted, symbols, showLangKey);
 }
 
 const fui::KeyboardKey* KeyboardEntryActivity::selectedKey() const {
@@ -276,11 +277,11 @@ bool KeyboardEntryActivity::activateValue(const int16_t value, const bool longPr
     case fui::QWERTY_KEY_LANG: {
       delPressCount = 0;
       hintVisible = false;
-      const fui::KeyboardLayoutId nextId = keyboard_layouts::next(layoutId);
+      const uint8_t nextIndex = keyboard_layouts::next(layoutIndex);
       // The non-Latin tables draw the key even with one layout enabled; a
       // full-screen e-ink repaint for an unchanged keyboard costs a second.
-      if (nextId == layoutId) return false;
-      layoutId = nextId;
+      if (nextIndex == layoutIndex) return false;
+      layoutIndex = nextIndex;
       // Shift is per-layer: carrying it across would strand the new layout in
       // upper case. Row widths differ between scripts (Cyrillic runs 12/11/11
       // against Latin's 10/9/9), so the selection has to be re-clamped.
@@ -977,8 +978,9 @@ void KeyboardEntryActivity::render(RenderLock&&) {
   props.inputMask = static_cast<uint16_t>(fui::InputTouch | fui::InputLongPress);
   props.selectedIndex = cursorMode ? -1 : static_cast<int16_t>(selectedLogicalIndex());
   // The 12-column Arabic rows need the smaller font for wide isolated letters.
-  props.labelText.font = layoutId == fui::KeyboardLayoutId::ArabicAr && !symbols ? fui::GfxRendererTarget::FONT_SMALL
-                                                                                 : fui::GfxRendererTarget::FONT_BODY;
+  props.labelText.font = keyboard_layouts::ALL[layoutIndex].id == fui::KeyboardLayoutId::ArabicAr && !symbols
+                             ? fui::GfxRendererTarget::FONT_SMALL
+                             : fui::GfxRendererTarget::FONT_BODY;
   props.altText.font = fui::GfxRendererTarget::FONT_SMALL;
   props.gap = static_cast<int16_t>(metrics.keyboardKeySpacing);
   props.padding = fui::Insets{0, 0, 0, 0};

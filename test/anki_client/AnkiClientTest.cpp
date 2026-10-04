@@ -322,6 +322,14 @@ TEST(AnkiCardCache, LineRoundTrip) {
   EXPECT_EQ(back.next[3], "4d");
   EXPECT_EQ(back.next[1], "");
   EXPECT_EQ(back.mediaCount, 2);
+  EXPECT_EQ(back.typeAnswer, "");
+  EXPECT_EQ(AnkiCardCache::toLine(c).find("type_"), std::string::npos);
+
+  c.typeAnswer = "caf\xC3\xA9";
+  c.typeIgnoreAccents = true;
+  ASSERT_TRUE(AnkiCardCache::parseLine(AnkiCardCache::toLine(c), back));
+  EXPECT_EQ(back.typeAnswer, c.typeAnswer);
+  EXPECT_TRUE(back.typeIgnoreAccents);
 }
 
 TEST(AnkiCardCache, CardIdsSinglePass) {
@@ -422,6 +430,29 @@ TEST(AnkiSyncEngine, ExchangeStreamsCardsAndAcksReviews) {
   EXPECT_EQ(meta.counts.newCount, 7);
   EXPECT_EQ(meta.fetchedAt, 1700000000);
   EXPECT_EQ(meta.syncError, "sync timed out");
+}
+
+TEST(AnkiSyncEngine, ExchangeKeepsTypeAnswer) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, [] { return int64_t(1700000000); });
+  const AnkiAccount a = testAccount();
+  http.responses["POST /v1/p/alice/exchange"] = {
+      200,
+      "{\"cards\":[{\"card_id\":5,\"deck\":\"D\",\"q\":\"Q\\n\\n[[type:nc:Word]]\",\"a\":\"[[type:nc:Word]]\","
+      "\"kind\":\"due\",\"next\":[\"1m\",\"2m\",\"3m\",\"4m\"],\"type_answer\":\"caf\u00e9\",\"type_nc\":true},"
+      "{\"card_id\":6,\"deck\":\"D\",\"q\":\"plain\",\"a\":\"b\",\"kind\":\"new\"}],"
+      "\"counts\":{\"new\":1,\"learning\":0,\"due\":1,\"returned\":2}}"};
+  const auto r = engine.exchange(a, true);
+  ASSERT_TRUE(r.ok) << r.error;
+  AnkiCardCache cache(fs, ankipaths::cardsFile(a.id), ankipaths::cacheMetaFile(a.id));
+  AnkiCard c;
+  ASSERT_TRUE(cache.load(0, c));
+  EXPECT_EQ(c.typeAnswer, "caf\xC3\xA9");
+  EXPECT_TRUE(c.typeIgnoreAccents);
+  ASSERT_TRUE(cache.load(1, c));
+  EXPECT_EQ(c.typeAnswer, "");
+  EXPECT_FALSE(c.typeIgnoreAccents);
 }
 
 TEST(AnkiSyncEngine, ExchangeErrorKeepsJournalAndCache) {
@@ -689,6 +720,62 @@ TEST(AnkiConnectClient, ExchangeAnswersCardsAndStreamsQueue) {
   EXPECT_EQ(decks[2].name, "Dutch::Common");
   EXPECT_EQ(decks[2].due, 2);
   EXPECT_EQ(decks[2].newCount, 1);
+}
+
+TEST(AnkiConnectClient, TypeAnswerComesFromTheNamedField) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, [] { return int64_t{1700000000}; });
+  const AnkiAccount a = connectAccount();
+  http.responses["deckNames"] = "{\"result\":[\"Default\"],\"error\":null}";
+  http.responses["getDeckStats"] =
+      "{\"result\":{\"1\":{\"name\":\"Default\",\"new_count\":0,\"learn_count\":0,\"review_count\":4}},"
+      "\"error\":null}";
+  http.responses["findCards"] = "{\"result\":[1,2,3,4,5],\"error\":null}";
+  // Basic type-in, cloze type-in (ord 1 -> c2), an empty field (markers
+  // dropped), and an unknown field (markers kept, nothing to compare).
+  http.responses["cardsInfo"] =
+      "{\"result\":["
+      "{\"cardId\":1,\"ord\":0,\"fields\":{\"Front\":{\"value\":\"to promise\",\"order\":0},"
+      "\"Word\":{\"value\":\"<b>promise</b>\",\"order\":1}},\"question\":\"to promise<br>[[type:Word]]\","
+      "\"answer\":\"to promise<hr id=answer>[[type:Word]]<br>promise\",\"deckName\":\"Default\",\"queue\":2},"
+      "{\"cardId\":2,\"ord\":1,\"fields\":{\"Text\":{\"value\":\"{{c1::a}} {{c2::b::hint}}\",\"order\":0}},"
+      "\"question\":\"a [...] [[type:cloze:Text]]\",\"answer\":\"a b [[type:cloze:Text]]\",\"deckName\":\"Default\","
+      "\"queue\":2},"
+      "{\"cardId\":3,\"ord\":0,\"fields\":{\"Word\":{\"value\":\"\",\"order\":0}},"
+      "\"question\":\"Q [[type:nc:Word]]\",\"answer\":\"Q<hr id=answer>[[type:nc:Word]] A\",\"deckName\":\"Default\","
+      "\"queue\":2},"
+      "{\"cardId\":4,\"ord\":0,\"fields\":{\"Front\":{\"value\":\"x\",\"order\":0}},"
+      "\"question\":\"Q [[type:Missing]]\",\"answer\":\"[[type:Missing]]\",\"deckName\":\"Default\",\"queue\":2}"
+      "],\"error\":null}";
+  // A field too big to keep counts as unknown, like a missing one.
+  std::string& info = http.responses["cardsInfo"];
+  info.insert(info.rfind(']'), ",{\"cardId\":5,\"ord\":0,\"fields\":{\"Word\":{\"value\":\"" + std::string(3000, 'x') +
+                                   "\",\"order\":0}},\"question\":\"Q [[type:Word]]\",\"answer\":\"[[type:Word]]\","
+                                   "\"deckName\":\"Default\",\"queue\":2}");
+
+  const AnkiSyncEngine::Result r = engine.syncAccount(a, /*wantCards=*/true);
+  ASSERT_TRUE(r.ok) << r.error;
+  AnkiCardCache cache(fs, ankipaths::cardsFile(a.id), ankipaths::cacheMetaFile(a.id));
+  ASSERT_GE(cache.count(), 5u);  // the fake repeats its card list per cardsInfo batch
+  AnkiCard c;
+  ASSERT_TRUE(cache.load(0, c));
+  EXPECT_EQ(c.q, "to promise\n[[type:Word]]");
+  EXPECT_EQ(c.a, "[[type:Word]]\npromise");
+  EXPECT_EQ(c.typeAnswer, "promise");
+  EXPECT_FALSE(c.typeIgnoreAccents);
+  ASSERT_TRUE(cache.load(1, c));
+  EXPECT_EQ(c.typeAnswer, "b");
+  ASSERT_TRUE(cache.load(2, c));
+  EXPECT_EQ(c.typeAnswer, "");
+  EXPECT_EQ(c.q, "Q ");
+  EXPECT_EQ(c.a, " A");
+  ASSERT_TRUE(cache.load(3, c));
+  EXPECT_EQ(c.typeAnswer, "");
+  EXPECT_EQ(c.q, "Q [[type:Missing]]");
+  ASSERT_TRUE(cache.load(4, c));
+  EXPECT_EQ(c.typeAnswer, "");
+  EXPECT_EQ(c.q, "Q [[type:Word]]");
 }
 
 TEST(AnkiConnectClient, ErrorsKeepJournalAndFlagBadKey) {

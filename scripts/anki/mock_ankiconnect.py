@@ -14,14 +14,24 @@ PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
 
 CSS = "<style>.card { font-family: arial; font-size: 20px; text-align: center; color: black; background-color: white; }</style>"
 
-DECKS = {"Default": 1, "Dutch": 2, "Dutch::Common": 3, "Cloze demo": 4}
+DECKS = {"Default": 1, "Dutch": 2, "Dutch::Common": 3, "Cloze demo": 4, "English::Spelling": 5}
 STATS = {
     "Default": (0, 0, 0),
     "Dutch": (2, 1, 3),
     "Dutch::Common": (2, 1, 3),
     "Cloze demo": (1, 0, 0),
+    "English::Spelling": (0, 2, 0),
 }
 CARDS = {
+    # Type-in-the-answer cards: the field the marker names is the expected answer.
+    1998: {"deck": "English::Spelling", "queue": 1, "type": 1,
+           "fields": {"Front": "обещать; обещание", "Word": "<b>promise</b>"},
+           "q": "обещать; обещание<br><br>[[type:Word]]",
+           "a": "[[type:Word]]<br><br>Dutch: <b>beloven</b>"},
+    1999: {"deck": "English::Spelling", "queue": 1, "type": 1,
+           "fields": {"Front": "coffee", "Word": "café"},
+           "q": "coffee (accents optional)<br><br>[[type:nc:Word]]",
+           "a": "[[type:nc:Word]]"},
     2001: {"deck": "Dutch::Common", "queue": 1, "type": 1,
            "q": "<div class=front>het <b>huis</b><br><i>Het huis is groot.</i></div>",
            "a": "the house &amp; home[sound:huis.mp3]"},
@@ -88,7 +98,8 @@ def handle(req):
                 continue
             out.append({
                 "cardId": cid, "note": cid * 10, "deckName": c["deck"], "modelName": "Basic",
-                "fields": {"Front": {"value": c["q"], "order": 0}, "Back": {"value": c["a"], "order": 1}},
+                "fields": {name: {"value": value, "order": i} for i, (name, value) in
+                           enumerate(c.get("fields", {"Front": c["q"], "Back": c["a"]}).items())},
                 "css": ".card {}", "question": CSS + c["q"],
                 "answer": CSS + c["q"] + "<hr id=answer>" + c["a"],
                 "queue": c["queue"], "type": c["type"], "interval": 3, "due": 1, "reps": 2, "lapses": 0,

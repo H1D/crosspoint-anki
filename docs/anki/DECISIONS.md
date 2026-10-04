@@ -343,3 +343,50 @@ whole afterwards.
   delivered HTML nests gloss and translation lists in a way the EPUB layout
   engine ran together ("distanceближний"). Other HTML dictionaries are shown
   as before.
+
+## Type-in cards (2026-10-05)
+
+- **The expected answer travels with the card.** Anki leaves `{{type:Field}}`
+  in the rendered text as `[[type:Field]]`; only desktop's reviewer knows the
+  field value. AnkiDo now adds `type_answer` (plain text, as Anki's
+  `compare_answer` prepares it) and `type_nc` to the compact card. For
+  AnkiConnect the device reads the named field out of `cardsInfo`'s `fields`
+  (cloze specs: the card's `ord` + 1, via `ankitype::clozeForTyping`). The
+  cache line gains the same two keys. Rejected: asking AnkiDo for
+  `fields=full`, which ships the card HTML and CSS of every card.
+- **The markers stay in `q` and `a`.** On the question side the marker is
+  where the box goes, on the answer side where the comparison goes (no
+  marker in the answer: the comparison leads it). A known field with nothing
+  to type drops the markers, as Anki does. An unknown expected answer (older
+  AnkiDo, unknown field) still lets you type; the answer side then shows the
+  typed text uncompared.
+- **Typing.** Confirm on the front, or a tap on the box, opens the keyboard;
+  OK flips (Anki's Enter), Back returns to the question. Touch taps
+  elsewhere still page and flip, so a type-in card can be reviewed without
+  typing.
+- **Comparison like Anki, in black and white.** Exact after whitespace
+  collapse, case-sensitive (Anki's rule). `nc:` folds diacritics: Latin-1 and
+  Latin Extended-A letters that decompose, Cyrillic ё/й, and combining marks
+  (Russian stress accents). The typed line marks wrong characters inverted,
+  the bold expected line below marks what the typing missed (LCS on code
+  points, up to 80; longer answers are marked whole). A marked space shows as
+  "·", since an inverted space would draw as nothing. Anki's "↓" between the
+  lines is not in the reader fonts, so bold tells the lines apart. Nothing
+  typed or a match: just the expected text (a fully inverted answer is a
+  heavy black block on e-ink).
+- **Bounded.** AnkiConnect field values over 2 KB are not kept while a card
+  streams in, and expected answers over 512 bytes count as unknown (both
+  backends), so one odd note cannot bloat the heap or the cache line.
+- **European keyboards in app code.** The SDK's French layout has only é and
+  its German one lacks ä/ö; there is no Italian, Portuguese, Dutch or Polish
+  layout, and no accent popup. `EuKeyboardLayouts.cpp` defines those letter
+  layers with the SDK's public key structs: a row of the language's accented
+  letters (12 keys at most, the panel's limit) or, for German, ü ö ä ß in
+  their QWERTZ places. They replace the SDK letters for French and German
+  (same mask bits) and are appended as new bits for IT, PT, NL, PL. Layouts
+  are now named by their table index, since several share an SDK id.
+- **Keyboard follows the answer's script.** It opens on an enabled layout for
+  the script of the expected answer (a Cyrillic layout for a Russian answer),
+  otherwise on the usual starting layout. The language within a script is
+  not picked: accented letters would hint at the answer.
+
