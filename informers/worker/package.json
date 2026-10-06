@@ -1,0 +1,10 @@
+{
+  "name": "crosspoint-informers",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "bun scripts/render.mjs",
+    "fonts": "python3 scripts/bake_fonts.py > src/fonts.js",
+    "deploy": "wrangler deploy"
+  }
+}

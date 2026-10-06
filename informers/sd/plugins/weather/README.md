@@ -1,15 +1,17 @@
-Weather informer
+Weather informer (Weer)
 
-Each time the reader goes to sleep it joins WiFi, downloads a forecast image from your informer server, and saves it to /informers/1-weather.bmp.
+A forecast in simple Dutch for children: temperature, rain in the next two hours (Buienalarm), a clothing tip, and the next four days (Buienradar).
+
+Each time the reader goes to sleep it joins WiFi, downloads the image, and saves it to /informers/1-weather.bmp.
 
 To view it: open the file browser, go to /informers, and open the image. Left and Right flip between informers.
 
-To show the forecast on the sleep screen, set "dest" in config.json to /sleep.bmp and set Sleep Screen to Custom.
+To show it on the sleep screen instead, set "dest" in config.json to /sleep.bmp and set Sleep Screen to Custom.
 
-Setup (in config.json, next to this file):
-- server: address of the informer server, e.g. http://192.168.1.10:8790
-- lat, lon: your location
-- place: label for the top of the image (use %20 for spaces)
+Settings, in config.json next to this file:
+- server: the informer Worker address
+- lat, lon: your location (Netherlands only; the data covers NL)
+- place: name at the top of the image (use %20 for spaces)
 - dest: where the image is saved
 
-The image is refreshed on sleep only; it shows the time it was made. Needs battery of at least 20% and a saved WiFi network.
+The image refreshes only when the reader sleeps; it shows the time it was made. Needs a battery of at least 20% and a saved WiFi network.

@@ -1,7 +1,9 @@
 {
-  "title": "Weather",
-  "description": "Forecast image, refreshed each time the reader sleeps",
-  "config": { "file": "config.json" },
+  "title": "Weather (Weer)",
+  "description": "Dutch forecast for kids, refreshed each time the reader sleeps",
+  "config": {
+    "file": "config.json"
+  },
   "events": {
     "sleep.enter": {
       "download": {
