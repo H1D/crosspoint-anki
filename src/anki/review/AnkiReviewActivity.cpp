@@ -202,7 +202,7 @@ std::vector<ankimarkup::Run> AnkiReviewActivity::withTypeComparison(std::vector<
   }
   if (!comparison.empty()) {
     if (!out.empty() && !out.back().newline) appendNewline();
-    for (ankimarkup::Run& r : comparison) out.push_back(std::move(r));
+    std::move(comparison.begin(), comparison.end(), std::back_inserter(out));
     if (resume < answer.size() && !answer[resume].newline) appendNewline();
   }
   for (size_t i = resume; i < answer.size(); i++) {
