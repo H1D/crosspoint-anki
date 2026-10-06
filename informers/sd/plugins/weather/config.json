@@ -1,0 +1,7 @@
+{
+  "server": "http://192.168.1.10:8790",
+  "lat": "52.37",
+  "lon": "4.90",
+  "place": "Amsterdam",
+  "dest": "/informers/1-weather.bmp"
+}

@@ -1,0 +1,13 @@
+{
+  "title": "Weather",
+  "description": "Forecast image, refreshed each time the reader sleeps",
+  "config": { "file": "config.json" },
+  "events": {
+    "sleep.enter": {
+      "download": {
+        "url": "{cfg.server}/weather.bmp?lat={cfg.lat}&lon={cfg.lon}&place={cfg.place}",
+        "dest": "{cfg.dest}"
+      }
+    }
+  }
+}
