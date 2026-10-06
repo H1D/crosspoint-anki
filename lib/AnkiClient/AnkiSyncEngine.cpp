@@ -4,6 +4,7 @@
 #include "AnkiJson.h"
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
+#include "AnkiTypeAnswer.h"
 
 namespace {
 
@@ -179,12 +180,19 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool
           card.q = v;
         else if (key == "a")
           card.a = v;
+        else if (key == "type_answer" && v.size() <= ankitype::MAX_ANSWER_BYTES)
+          card.typeAnswer = v;
       }
     } else if (section == Section::Reviews && depth == 2) {
       if (key == "client_id") reviewClientId = v;
     } else if (section == Section::Sync) {
       if (key == "code" && syncErrCode.empty()) syncErrCode = v;
       if (key == "message" && syncErrMessage.empty()) syncErrMessage = v;
+    }
+  };
+  cb.onBool = [&](const bool v) {
+    if (section == Section::Cards && cardDepth != 0 && depth == cardDepth && key == "type_nc") {
+      card.typeIgnoreAccents = v;
     }
   };
   cb.onNumber = [&](const std::string& v) {

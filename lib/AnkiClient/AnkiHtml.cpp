@@ -172,6 +172,7 @@ std::string trim(const std::string& s) {
 class Converter {
  public:
   unsigned images = 0;
+  bool plain = false;  // text only: no bold/italic/image markers
 
   void feed(const std::string& s) {
     size_t i = 0;
@@ -302,15 +303,15 @@ class Converter {
         return;
       }
     }
-    if (t.name == "b" || t.name == "strong")
-      emit("**");
-    else if (t.name == "i" || t.name == "em")
-      emit("_");
-    else if (isBlock(t.name))
+    if (t.name == "b" || t.name == "strong") {
+      if (!plain) emit("**");
+    } else if (t.name == "i" || t.name == "em") {
+      if (!plain) emit("_");
+    } else if (isBlock(t.name)) {
       emitChar('\n');
-    else if (t.name == "img") {
+    } else if (t.name == "img") {
       images++;
-      emit("[img:" + t.src + "]");
+      if (!plain) emit("[img:" + t.src + "]");
     }
   }
 
@@ -329,12 +330,13 @@ class Converter {
       }
       return;
     }
-    if (t.name == "b" || t.name == "strong")
-      emit("**");
-    else if (t.name == "i" || t.name == "em")
-      emit("_");
-    else if (t.name != "br" && isBlock(t.name))
+    if (t.name == "b" || t.name == "strong") {
+      if (!plain) emit("**");
+    } else if (t.name == "i" || t.name == "em") {
+      if (!plain) emit("_");
+    } else if (t.name != "br" && isBlock(t.name)) {
       emitChar('\n');
+    }
   }
 };
 
@@ -347,6 +349,23 @@ std::string toMarkup(const std::string& html, unsigned* images) {
   conv.feed(html);
   if (images) *images = conv.images;
   return conv.text();
+}
+
+std::string toTextLine(const std::string& html) {
+  Converter conv;
+  conv.plain = true;
+  conv.feed(html);
+  std::string text = conv.text();
+  std::string out;
+  out.reserve(text.size());
+  for (const char c : text) {
+    if (c != '\n') {
+      out.push_back(c);
+    } else if (!out.empty() && out.back() != ' ') {
+      out.push_back(' ');
+    }
+  }
+  return out;
 }
 
 std::string answerPart(const std::string& answerHtml) {

@@ -3,6 +3,7 @@
 #include <AnkiJournal.h>
 #include <AnkiPaths.h>
 #include <AnkiSyncEngine.h>
+#include <AnkiTypeAnswer.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
@@ -18,6 +19,7 @@
 #include "AnkiAccountPickerActivity.h"
 #include "AnkiSyncActivity.h"
 #include "CrossPointSettings.h"
+#include "activities/util/KeyboardEntryActivity.h"
 #include "anki/AnkiAccountStore.h"
 #include "anki/AnkiDevice.h"
 #include "anki/AnkiSecureHttp.h"
@@ -31,6 +33,8 @@ namespace {
 constexpr size_t MAX_SPAN_BYTES = 191;
 constexpr int SIDE_PADDING = 20;
 constexpr int GRADE_COUNT = 4;
+constexpr int TYPE_BOX_PADDING = 8;  // text inset inside the type-in box
+constexpr size_t MAX_TYPED_BYTES = 200;
 
 const char* gradeLabel(const int index) {
   switch (index) {
@@ -150,19 +154,106 @@ void AnkiReviewActivity::loadCurrent() {
   }
   runs = ankimarkup::parse(card.q);
   answerRunStart = runs.size();
+  typed.clear();
+  typeRun = -1;
+  // The first marker becomes the box to type in; any further ones are dropped.
+  for (size_t i = 0; i < runs.size(); i++) {
+    if (!runs[i].typeIn) continue;
+    if (typeRun < 0) {
+      typeRun = static_cast<int>(i);
+      runs[i].text = tr(STR_ANKI_TYPE_ANSWER);
+      runs[i].italic = true;
+    } else {
+      runs[i].text.clear();
+    }
+  }
   mode = Mode::Front;
   layout();
 }
 
+// The answer's "[[type:...]]" marker becomes Anki's comparison of the typed
+// answer with the expected one, on lines of its own; with no marker in the
+// answer the comparison leads it. Other cards just lose stray markers.
+std::vector<ankimarkup::Run> AnkiReviewActivity::withTypeComparison(std::vector<ankimarkup::Run> answer) const {
+  std::vector<ankimarkup::Run> comparison;
+  if (typeRun >= 0) {
+    if (!card.typeAnswer.empty()) {
+      comparison = ankitype::compare(typed, card.typeAnswer, card.typeIgnoreAccents);
+    } else if (!typed.empty()) {
+      // Expected text unknown (e.g. an older AnkiDo): show what was typed.
+      ankimarkup::Run run;
+      run.text = typed;
+      comparison.push_back(std::move(run));
+    }
+  }
+  const auto marker = std::find_if(answer.begin(), answer.end(), [](const ankimarkup::Run& r) { return r.typeIn; });
+  const size_t at = marker == answer.end() ? 0 : static_cast<size_t>(marker - answer.begin());
+  const size_t resume = marker == answer.end() ? 0 : at + 1;
+
+  std::vector<ankimarkup::Run> out;
+  out.reserve(answer.size() + comparison.size() + 2);
+  const auto appendNewline = [&out] {
+    ankimarkup::Run nl;
+    nl.newline = true;
+    out.push_back(nl);
+  };
+  for (size_t i = 0; i < at; i++) {
+    if (!answer[i].typeIn) out.push_back(std::move(answer[i]));
+  }
+  if (!comparison.empty()) {
+    if (!out.empty() && !out.back().newline) appendNewline();
+    std::move(comparison.begin(), comparison.end(), std::back_inserter(out));
+    if (resume < answer.size() && !answer[resume].newline) appendNewline();
+  }
+  for (size_t i = resume; i < answer.size(); i++) {
+    if (!answer[i].typeIn) out.push_back(std::move(answer[i]));
+  }
+  return out;
+}
+
 void AnkiReviewActivity::flip() {
   RenderLock lock;
-  std::vector<ankimarkup::Run> answer = ankimarkup::parse(card.a);
+  // The question's type box gives way to the comparison in the answer.
+  for (size_t i = 0; i < answerRunStart; i++) {
+    if (runs[i].typeIn) runs[i].text.clear();
+  }
+  std::vector<ankimarkup::Run> answer = withTypeComparison(ankimarkup::parse(card.a));
   runs.reserve(runs.size() + answer.size());
   runs.insert(runs.end(), std::make_move_iterator(answer.begin()), std::make_move_iterator(answer.end()));
   mode = Mode::Back;
   layout();
   // Open on the page that shows the answer.
   currentPage = ruleLine >= 0 ? std::min(ruleLine / linesPerPage, totalPages - 1) : 0;
+}
+
+void AnkiReviewActivity::openTypeKeyboard() {
+  auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ANKI_TYPE_ANSWER), typed,
+                                                           MAX_TYPED_BYTES, InputType::Text);
+  if (!keyboard) {
+    LOG_ERR("ANKI", "OOM: keyboard");
+    return;
+  }
+  keyboard->preferScriptOf(card.typeAnswer);
+  // OK shows the answer, as Enter does in Anki; Back returns to the question.
+  startActivityForResult(std::move(keyboard), [this](const ActivityResult& result) {
+    if (!result.isCancelled && std::holds_alternative<KeyboardResult>(result.data)) {
+      {
+        RenderLock lock;
+        typed = std::get<KeyboardResult>(result.data).text;
+      }
+      flip();
+    }
+    requestUpdate();
+  });
+}
+
+bool AnkiReviewActivity::typeBoxContains(const int y) const {
+  if (typeRun < 0 || typeLineFirst < 0) return false;
+  const int lineHeight = renderer.getLineHeight(SETTINGS.getReaderFontId());
+  const BodyArea body = bodyArea();
+  if (y < body.y || y >= body.y + linesPerPage * lineHeight) return false;
+  const int line = currentPage * linesPerPage + (y - body.y) / lineHeight;
+  return line >= typeLineFirst && line <= typeLineLast;
 }
 
 void AnkiReviewActivity::grade(const uint8_t ease) {
@@ -267,6 +358,8 @@ void AnkiReviewActivity::layout() {
   segments.clear();
   segments.reserve(runs.size() + 16);
   ruleLine = -1;
+  typeLineFirst = -1;
+  typeLineLast = -1;
 
   const int fontId = SETTINGS.getReaderFontId();
   const BodyArea body = bodyArea();
@@ -276,9 +369,10 @@ void AnkiReviewActivity::layout() {
 
   int x = 0;
   int line = 0;
+  int lineStart = 0;  // TYPE_BOX_PADDING inside the type-in box
   const auto newLine = [&] {
     line++;
-    x = 0;
+    x = lineStart;
   };
 
   for (size_t ri = 0; ri < runs.size(); ri++) {
@@ -292,6 +386,15 @@ void AnkiReviewActivity::layout() {
       newLine();
       continue;
     }
+    // The type-in box takes whole lines, its text inset by the padding.
+    if (run.typeIn) {
+      if (run.text.empty()) continue;
+      if (x > 0) newLine();
+      typeLineFirst = line;
+      lineStart = TYPE_BOX_PADDING;
+      x = lineStart;
+    }
+    const int lineEnd = run.typeIn ? maxWidth - TYPE_BOX_PADDING : maxWidth;
     const EpdFontFamily::Style style = styleOf(run);
     renderer.ensureSdCardFontReady(fontId, run.text.c_str(), static_cast<uint8_t>(1u << style));
     const int spaceWidth = renderer.getSpaceWidth(fontId, style);
@@ -314,7 +417,7 @@ void AnkiReviewActivity::layout() {
     while (pos < n) {
       const char c = text[pos];
       if (c == ' ' || c == '\t' || c == '\r') {
-        if (x > 0) {
+        if (x > lineStart) {
           x += spaceWidth;
         } else {
           segStart = pos + 1;
@@ -330,16 +433,21 @@ void AnkiReviewActivity::layout() {
       // Never cut a UTF-8 sequence at the byte cap.
       while (pos - tokenStart > 1 && pos < n && (text[pos] & 0xC0) == 0x80) pos--;
       const int width = measure(fontId, text + tokenStart, pos - tokenStart, style);
-      if (x > 0 && x + width > maxWidth) {
+      if (x > lineStart && x + width > lineEnd) {
         flush(tokenStart);
         newLine();
         segStart = tokenStart;
-        segX = 0;
+        segX = lineStart;
       }
       x += width;
       segEndX = x;
     }
     flush(n);
+    if (run.typeIn) {
+      typeLineLast = line;
+      lineStart = 0;
+      newLine();
+    }
   }
 
   lineCount = std::max(1, line + (x > 0 ? 1 : 0));
@@ -366,7 +474,12 @@ void AnkiReviewActivity::loop() {
       return;
 
     case Mode::Front: {
+      // Type-in cards: Confirm or a tap on the box opens the keyboard.
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        if (typeRun >= 0) {
+          openTypeKeyboard();
+          return;
+        }
         flip();
         requestUpdate();
         return;
@@ -374,6 +487,10 @@ void AnkiReviewActivity::loop() {
       // Reader-style tap zones: left third = previous page, the rest = next
       // page, and the last page flips.
       if (tapped) {
+        if (typeBoxContains(ty)) {
+          openTypeKeyboard();
+          return;
+        }
         if (tx < renderer.getScreenWidth() / 3 && currentPage > 0) {
           currentPage--;
         } else if (currentPage + 1 < totalPages) {
@@ -479,8 +596,15 @@ void AnkiReviewActivity::drawBody(const int fontId, const BodyArea& body) const 
     buf[len] = '\0';
     const int x = body.x + seg.x;
     const int y = body.y + (seg.line - firstLine) * lineHeight;
+    if (run.mark) {
+      // Inverted, like Anki's red/grey comparison highlights.
+      renderer.fillRect(x - 1, y, seg.width + 2, lineHeight);
+      renderer.drawText(fontId, x, y, buf, false, styleOf(run));
+      continue;
+    }
     renderer.drawText(fontId, x, y, buf, true, styleOf(run));
     if (run.cloze) renderer.drawRect(x - 3, y, seg.width + 6, lineHeight);
+    if (run.typeIn) renderer.drawRect(body.x, y, body.width, lineHeight);
   }
   if (ruleLine >= firstLine && ruleLine < lastLine) {
     const int y = body.y + (ruleLine - firstLine) * lineHeight + lineHeight / 2;
@@ -518,8 +642,8 @@ void AnkiReviewActivity::drawHints() const {
       labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_ANKI_SYNC), "", "");
       break;
     case Mode::Front:
-      labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_ANKI_SHOW_ANSWER), currentPage > 0 ? "<" : "",
-                                     currentPage + 1 < totalPages ? ">" : "");
+      labels = mappedInput.mapLabels(tr(STR_BACK), typeRun >= 0 ? tr(STR_ANKI_TYPE) : tr(STR_ANKI_SHOW_ANSWER),
+                                     currentPage > 0 ? "<" : "", currentPage + 1 < totalPages ? ">" : "");
       break;
     case Mode::Back: {
       labels = mappedInput.mapDirectionalLabels(tr(STR_BACK), totalPages > 1 ? ">" : "", tr(STR_ANKI_AGAIN),

@@ -38,6 +38,11 @@ struct AnkiCard {
   std::string a;
   std::string next[4];  // again, hard, good, easy
   uint8_t mediaCount = 0;
+  // Type-in-the-answer cards ("[[type:...]]" in q): the plain text a typed
+  // answer is checked against, empty when unknown (the answer side then shows
+  // what was typed without a comparison).
+  std::string typeAnswer;
+  bool typeIgnoreAccents = false;  // the marker's "nc:"
 };
 
 struct AnkiDeck {

@@ -16,7 +16,8 @@ void KeyboardLayoutsActivity::onEnter() {
   edited = false;
 
   for (int i = 0; i < keyboard_layouts::COUNT; ++i) {
-    rowItems[i].label = I18N.getLanguageName(keyboard_layouts::ALL[i].language);
+    const keyboard_layouts::LayoutInfo& info = keyboard_layouts::ALL[i];
+    rowItems[i].label = info.name ? info.name : I18N.getLanguageName(info.language);
     rowItems[i].actionValue = static_cast<int16_t>(i);
   }
 }

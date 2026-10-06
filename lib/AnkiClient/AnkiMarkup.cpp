@@ -76,6 +76,18 @@ std::vector<Run> parse(const std::string& input) {
         continue;
       }
     }
+    if (c == '[' && text.compare(i, 7, "[[type:") == 0) {
+      const size_t close = text.find("]]", i + 7);
+      if (close != std::string::npos) {
+        flush(runs, buf, bold, italic);
+        Run r;
+        r.typeIn = true;
+        r.text = text.substr(i + 7, close - i - 7);
+        runs.push_back(std::move(r));
+        i = close + 1;
+        continue;
+      }
+    }
     if (c == '[') {
       const size_t close = text.find(']', i + 1);
       if (close != std::string::npos) {
@@ -106,6 +118,8 @@ std::string toPlain(const std::string& text) {
   for (const Run& r : parse(text)) {
     if (r.newline) {
       out.push_back('\n');
+    } else if (r.typeIn) {
+      continue;
     } else if (r.cloze) {
       out += "[" + r.text + "]";
     } else {

@@ -15,6 +15,10 @@ namespace ankihtml {
 // HTML -> markup text. `images` (optional) receives the number of <img> tags.
 std::string toMarkup(const std::string& html, unsigned* images = nullptr);
 
+// HTML -> one plain text line (no markup, lines joined by spaces): a note
+// field as Anki compares it against a typed answer.
+std::string toTextLine(const std::string& html);
+
 // Anki's answer side repeats the question above <hr id=answer>; returns only
 // what follows it (the whole input when the marker is absent).
 std::string answerPart(const std::string& answerHtml);
