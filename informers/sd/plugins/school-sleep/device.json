@@ -9,7 +9,11 @@
       "download": {
         "url": "{cfg.server}/school.bmp?kid={cfg.kid}&key={cfg.key}&depth={cfg.depth}",
         "dest": "{cfg.dest}"
-      }
+      },
+      "wake": [
+        "07:55",
+        "19:05"
+      ]
     }
   }
 }

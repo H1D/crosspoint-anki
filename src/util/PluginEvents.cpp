@@ -13,6 +13,7 @@
 
 #include "PluginHttp.h"
 #include "PluginLocations.h"
+#include "WakeSchedule.h"
 #include "components/UITheme.h"
 #include "network/ProtectedPaths.h"
 
@@ -37,11 +38,14 @@ constexpr size_t MAX_EVENT_RESPONSE = 8 * 1024;
 // "events" section. Rebuilt by refreshSubscriptions(); sized for a full
 // plugin list screen, not a marketplace.
 constexpr size_t MAX_EVENT_PLUGINS = 8;
+constexpr size_t MAX_WAKE_TIMES = 4;
 struct Subscriber {
   char name[24] = {0};      // plugin folder name; "" = empty slot
   char dir[64] = {0};       // "<root>/<name>"
   uint8_t mask = 0;         // bit per Event
   uint8_t connectMask = 0;  // events whose handler declares "connect": true
+  uint8_t wakeCount = 0;
+  int16_t wakeMinutes[MAX_WAKE_TIMES] = {0};  // sleep.enter "wake" times, minutes after local midnight
 };
 Subscriber subscribers[MAX_EVENT_PLUGINS];
 
@@ -86,6 +90,8 @@ void refreshSubscriptions() {
     if (deserializeJson(doc, raw, DeserializationOption::Filter(filter)) != DeserializationError::Ok) continue;
     uint8_t mask = 0;
     uint8_t connectMask = 0;
+    uint8_t wakeCount = 0;
+    int16_t wakeMinutes[MAX_WAKE_TIMES] = {0};
     for (JsonPairConst kv : doc["events"].as<JsonObjectConst>()) {
       const int e = eventFromName(kv.key().c_str());
       if (e < 0) {
@@ -94,6 +100,16 @@ void refreshSubscriptions() {
       }
       mask |= static_cast<uint8_t>(1u << e);
       if (kv.value()["connect"] | false) connectMask |= static_cast<uint8_t>(1u << e);
+      if (e != static_cast<int>(Event::SleepEnter)) continue;
+      for (JsonVariantConst at : kv.value()["wake"].as<JsonArrayConst>()) {
+        const int minute = wakeschedule::parseClock(at.as<const char*>());
+        if (minute < 0 || wakeCount >= MAX_WAKE_TIMES) {
+          LOG_ERR("PEVT", "%s: wake time ignored (want up to %u \"HH:MM\")", entry.name.c_str(),
+                  static_cast<unsigned>(MAX_WAKE_TIMES));
+          continue;
+        }
+        wakeMinutes[wakeCount++] = static_cast<int16_t>(minute);
+      }
     }
     // sleep.enter exists to act before the chip powers down (sleep image,
     // pre-sleep sync), so subscribing implies "connect": true; requiring the
@@ -106,6 +122,8 @@ void refreshSubscriptions() {
     strncpy(sub.dir, entry.dir.c_str(), sizeof(sub.dir) - 1);
     sub.mask = mask;
     sub.connectMask = connectMask;
+    sub.wakeCount = wakeCount;
+    memcpy(sub.wakeMinutes, wakeMinutes, sizeof(wakeMinutes));
     LOG_DBG("PEVT", "%s subscribes mask=0x%02x", sub.name, sub.mask);
   }
 }
@@ -122,6 +140,16 @@ uint8_t subscriptionMask(const char* plugin) {
     if (sub.name[0] != '\0' && strcmp(sub.name, plugin) == 0) return sub.mask;
   }
   return 0;
+}
+
+int64_t nextWake(const int64_t now) {
+  int64_t best = 0;
+  for (const auto& sub : subscribers) {
+    if (sub.name[0] == '\0' || sub.wakeCount == 0) continue;
+    const int64_t at = wakeschedule::nextWake(now, sub.wakeMinutes, sub.wakeCount);
+    if (at != 0 && (best == 0 || at < best)) best = at;
+  }
+  return best;
 }
 
 bool wantsConnectAny() {

@@ -360,6 +360,28 @@ static void syncAnkiBeforeSleep(const bool showPopup) {
   WiFi.mode(WIFI_OFF);
 }
 
+// Joins the last-connected saved network with a 10-second deadline, for the
+// sleep paths. Skipped on low battery; never blocks longer than the deadline.
+static bool joinSavedWifi(const bool showPopup) {
+  if (powerManager.getBatteryPercentage() < 20) return false;
+  // Every wake is a fresh boot, so the store is only populated here if the WiFi
+  // screen was opened since; load it or the join is always skipped.
+  WIFI_STORE.loadFromFile();
+  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (!cred) return false;
+
+  if (showPopup) GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+  const unsigned long joinDeadline = millis() + 10000;
+  while (WiFi.status() != WL_CONNECTED && millis() < joinDeadline) {
+    delay(100);
+  }
+  if (WiFi.status() == WL_CONNECTED) return true;
+  LOG_DBG("MAIN", "Sleep-event WiFi join timed out; deferring delivery");
+  return false;
+}
+
 // Plugin-event delivery on the way into deep sleep. sleep.enter is delivered
 // now — over the live connection, or by bringing WiFi up when a plugin
 // subscribes (e.g. fetching a fresh /sleep.bmp so THIS sleep shows it — the
@@ -397,26 +419,77 @@ static void deliverSleepPluginEvents() {
   // sleep.enter: reader.session is queued while reading and delivered on this
   // same sleep, and a progress-sync plugin usually subscribes to it alone.
   if (!pluginevents::wantsConnectAny()) return;
-  if (powerManager.getBatteryPercentage() < 20) return;
-  // Every wake is a fresh boot, so the store is only populated here if the WiFi
-  // screen was opened since; load it or the join is always skipped.
-  WIFI_STORE.loadFromFile();
-  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
-  if (!cred) return;
-
-  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
-  const unsigned long joinDeadline = millis() + 10000;
-  while (WiFi.status() != WL_CONNECTED && millis() < joinDeadline) {
-    delay(100);
-  }
-  if (WiFi.status() == WL_CONNECTED) {
+  if (joinSavedWifi(/*showPopup=*/true)) {
     trustedtime::startSync();  // snap the clock floor while the network is up
     pluginevents::drain(&renderer);
-  } else {
-    LOG_DBG("MAIN", "Sleep-event WiFi join timed out; deferring delivery");
   }
+}
+
+// Plugin refresh wakes ("wake" times on sleep.enter handlers). The target
+// survives deep sleep in RTC memory so a timer wake can tell an early wake
+// (the sleep timer runs off an RC oscillator and drifts) from a due one.
+RTC_DATA_ATTR int64_t refreshWakeTarget = 0;
+
+// Deep-sleep timer for the next plugin refresh time, in microseconds; 0 arms
+// nothing. Needs a trustworthy clock and enough battery for the WiFi join.
+static uint64_t armRefreshWake() {
+  refreshWakeTarget = 0;
+  if (powerManager.getBatteryPercentage() < 20) return 0;
+  const int64_t now = trustedtime::trustedNow();
+  if (now == 0) return 0;
+  const int64_t target = pluginevents::nextWake(now);
+  if (target <= now) return 0;
+  refreshWakeTarget = target;
+  LOG_DBG("MAIN", "Refresh wake in %lld s", static_cast<long long>(target - now));
+  return static_cast<uint64_t>(target - now) * 1000000ULL;
+}
+
+static void shutDownWifi() {
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+}
+
+void setupDisplayAndFonts(bool seamless);
+
+// Woken by the refresh timer: deliver sleep.enter again (fresh informer
+// images) without lighting up the UI, redraw the sleep screen when it shows
+// /sleep.bmp, and sleep until the next refresh time. The previous sleep's
+// APP_STATE is left untouched, so the next button wake resumes as before.
+static void runRefreshWake() {
+  setupDisplayAndFonts(/*seamless=*/true);
+  if (joinSavedWifi(/*showPopup=*/false)) {
+    const bool synced = trustedtime::syncNow(5000);
+    const int64_t now = trustedtime::trustedNow();
+    if (synced && refreshWakeTarget > 0 && now > 0 && now + 120 < refreshWakeTarget) {
+      // Woke early: the data for this refresh may not exist yet. Sleep the rest.
+      const int64_t target = refreshWakeTarget;
+      LOG_DBG("MAIN", "Refresh wake %lld s early; sleeping again", static_cast<long long>(target - now));
+      shutDownWifi();
+      Storage.prepareForDeepSleep();
+      refreshWakeTarget = target;
+      powerManager.startDeepSleep(gpio, static_cast<uint64_t>(target - now) * 1000000ULL);
+      return;
+    }
+    pluginevents::emit(pluginevents::Event::SleepEnter, nullptr, 0);
+    pluginevents::drain(nullptr);
+  }
+  shutDownWifi();
+  trustedtime::note();
+
+  const bool showsSleepImage =
+      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM ||
+      (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM && !APP_STATE.lastSleepFromReader);
+  if (showsSleepImage) {
+    deepSleepInProgress = true;
+    activityManager.goToSleep(/*fromTimeout=*/false, /*showPopup=*/false);
+  }
+  halTiltSensor.deepSleep();
+  display.deepSleep();
+  Storage.prepareForDeepSleep();
+  LOG_DBG("MAIN", "Refresh wake done; entering deep sleep");
+  powerManager.startDeepSleep(gpio, armRefreshWake());
 }
 
 // Enter deep sleep mode
@@ -456,17 +529,14 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-  }
+  shutDownWifi();
 
   halTiltSensor.deepSleep();
   display.deepSleep();
   Storage.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
-  powerManager.startDeepSleep(gpio);
+  powerManager.startDeepSleep(gpio, armRefreshWake());
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
@@ -618,8 +688,9 @@ void setup() {
   // light off unless Restore Light on Wake is enabled; silent maintenance
   // reboots replay the live state captured at restart, so they neither go dark
   // nor light up against the user's wake preference.
-  const bool restoreLightOn =
-      isSilentReboot ? silentRebootLightOn : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
+  const bool restoreLightOn = isSilentReboot ? silentRebootLightOn
+                                             : (wakeupReason != HalGPIO::WakeupReason::Timer &&
+                                                SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
 
   switch (wakeupReason) {
@@ -629,15 +700,15 @@ void setup() {
       if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         Storage.prepareForDeepSleep();
-        powerManager.startDeepSleep(gpio);
+        powerManager.startDeepSleep(gpio, armRefreshWake());
       }
       wakePowerReleasePending = true;
       break;
     case HalGPIO::WakeupReason::Timer:
-      // A timer wake is classified information only: it boots normally like
-      // any non-power-button wake until a consumer is added.
+      // Only plugin refresh times arm the timer (armRefreshWake()).
       LOG_DBG("MAIN", "Wakeup reason: Timer");
-      break;
+      runRefreshWake();
+      return;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");

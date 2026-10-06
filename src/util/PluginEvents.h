@@ -70,6 +70,12 @@ bool anySubscriber(Event e);
 // what leaves the device. Reflects the last refreshSubscriptions().
 uint8_t subscriptionMask(const char* plugin);
 
+// Epoch seconds of the next daily refresh time any sleep.enter handler asks
+// for ("wake": ["07:55", "19:05"], local time, up to 4 per plugin), or 0 when
+// none does. The sleep path arms the deep-sleep timer for it; the timer wake
+// delivers sleep.enter again and redraws a custom sleep screen.
+int64_t nextWake(int64_t now);
+
 // True when any queued event belongs to a handler marked "connect": true
 // (sleep.enter subscriptions imply it; see above): the sleep path may then
 // bring WiFi up, bounded, so delivery happens before the chip powers down
