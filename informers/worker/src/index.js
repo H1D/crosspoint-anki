@@ -1,10 +1,11 @@
 // Informer screens for CrossPoint readers: GET /<name>.bmp returns a 480x800
 // BMP (1-bit, or 4-level gray with depth=2) that an SD plugin downloads on
 // sleep. Register new informers here.
+import vakantie from "./informers/vakantie.js";
 import weather from "./informers/weather.js";
 import { renderBmp } from "./render.js";
 
-const INFORMERS = { weather };
+const INFORMERS = { weather, vakantie };
 const CACHE_SECONDS = 300;
 
 export default {

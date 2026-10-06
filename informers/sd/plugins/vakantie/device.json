@@ -1,0 +1,15 @@
+{
+  "title": "Holiday countdown (Vakantie)",
+  "description": "Days until the next Dutch school holiday, refreshed each time the reader sleeps",
+  "config": {
+    "file": "config.json"
+  },
+  "events": {
+    "sleep.enter": {
+      "download": {
+        "url": "{cfg.server}/vakantie.bmp?regio={cfg.regio}&depth={cfg.depth}",
+        "dest": "{cfg.dest}"
+      }
+    }
+  }
+}

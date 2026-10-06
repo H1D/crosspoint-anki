@@ -33,6 +33,7 @@ build.
 | Name | Data | Query |
 | --- | --- | --- |
 | `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `depth`, `demo=rain` |
+| `vakantie` | Rijksoverheid open data school holidays; days until the next holiday per region, simple Dutch for an 8-year-old | `regio=noord\|midden\|zuid`, `depth`, `vandaag=YYYY-MM-DD` |
 
 ## Develop and deploy
 
@@ -55,8 +56,9 @@ installed for Hermes).
 
 ## On the reader
 
-1. Copy `sd/plugins/weather` to `/plugins/weather` on the card, create
-   `/informers`, and edit `config.json` (lat, lon, place).
+1. Copy `sd/plugins/weather` to `/plugins/weather` on the card (and
+   `sd/plugins/vakantie` to `/plugins/vakantie`), create `/informers`, and edit
+   each `config.json` (weather: lat, lon, place; vakantie: regio).
 2. Connect the reader to WiFi once, then restart it so the plugin subscribes.
 3. Put the reader to sleep. It joins WiFi (battery at least 20%), downloads the
    image, and sleeps.
