@@ -1,0 +1,11 @@
+{
+  "worker": "https://crosspoint-informers.doorcomp.workers.dev",
+  "subgroups": {
+    "Groep 5a (Anna)": "group 5a or teacher Anna",
+    "Groep 5b (Ben)": "group 5b or teacher Ben"
+  },
+  "kids": {
+    "kid1": { "name": "Kid", "groups": ["Example School", "Groep 5a (Anna)"] },
+    "kid2": { "name": "Other", "groups": ["Example School", "Groep 5b (Ben)"] }
+  }
+}

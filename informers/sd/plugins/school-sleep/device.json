@@ -1,0 +1,15 @@
+{
+  "title": "School news on sleep screen",
+  "description": "School alarms on the sleep screen",
+  "config": {
+    "file": "config.json"
+  },
+  "events": {
+    "sleep.enter": {
+      "download": {
+        "url": "{cfg.server}/school.bmp?kid={cfg.kid}&key={cfg.key}&depth={cfg.depth}",
+        "dest": "{cfg.dest}"
+      }
+    }
+  }
+}

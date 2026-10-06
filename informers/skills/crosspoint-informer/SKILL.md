@@ -54,7 +54,11 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
    `fetchJson(url, { ttl })` from `../fetch.js`: it caches the upstream
    response at the edge for `ttl` seconds (default 300; a day for data that
    changes daily) and throws on non-2xx. Do not cache the finished image: it
-   is drawn per request so its printed time is always the time of the sleep. A secret (API key) goes in as a Worker secret:
+   is drawn per request so its printed time is always the time of the sleep.
+   Data behind a personal login (school news from Parro) is not fetched by the
+   Worker: a job on clawd pushes it into KV and the informer reads it there;
+   copy `informers/school/` and `src/informers/school.js` for that shape.
+   A secret (API key) goes in as a Worker secret:
    `npx wrangler secret put NAME` (same env vars as deploy) and is read from
    `env.NAME` in `render(c, params, env)`.
 2. **Write `worker/src/informers/<name>.js`:**

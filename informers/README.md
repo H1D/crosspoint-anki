@@ -17,7 +17,9 @@ build.
   sleep screen (when the sleep cover filter is off). No dependencies:
   `src/canvas.js` draws shapes and text into a pixel buffer, text comes from
   glyph bitmaps baked from Noto Sans (`scripts/bake_fonts.py` → `src/fonts.js`),
-  `src/icons.js` draws weather icons. Responses are cached for 5 minutes.
+  `src/icons.js` draws weather icons. Images are drawn per request; upstream
+  JSON is cached at the edge (`src/fetch.js`). Data that needs a login (school
+  news) is pushed into the `SCHOOL` KV namespace instead of fetched.
 - `worker/src/informers/<name>.js` is one informer: a default export with
   `render(canvas, params, env)` that draws into the canvas it is given (check
   `canvas.gray` to add shading only in gray mode). Register it in
@@ -34,6 +36,7 @@ build.
 | --- | --- | --- |
 | `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `depth`, `demo=rain` |
 | `vakantie` | Rijksoverheid open data school holidays; days until the next holiday per region, simple Dutch for an 8-year-old | `regio=noord\|midden\|zuid`, `depth`, `vandaag=YYYY-MM-DD` |
+| `school` | Parro news per child, pushed twice a day by a job on Hermes's host (see `school/README.md`); stays in KV, needs `key` | `kid`, `key`, `depth`, `vandaag=YYYY-MM-DD` |
 
 ## Develop and deploy
 
@@ -57,8 +60,10 @@ installed for Hermes).
 ## On the reader
 
 1. Copy `sd/plugins/weather` to `/plugins/weather` on the card (and
-   `sd/plugins/vakantie` to `/plugins/vakantie`), create `/informers`, and edit
-   each `config.json` (weather: lat, lon, place; vakantie: regio).
+   `sd/plugins/vakantie`, `sd/plugins/school`, `sd/plugins/school-sleep`),
+   create `/informers`, and edit each `config.json` (weather: lat, lon, place;
+   vakantie: regio; school and school-sleep: kid and key, from
+   `~/.hermes/secrets/crosspoint-school.env` on clawd).
 2. Connect the reader to WiFi once, then restart it so the plugin subscribes.
 3. Put the reader to sleep. It joins WiFi (battery at least 20%), downloads the
    image, and sleeps.
@@ -69,6 +74,7 @@ To show an informer as the sleep screen, set its `dest` to `/sleep.bmp` and
 set Sleep Screen to Custom. Images refresh only on sleep; each one prints the
 time it was rendered.
 
-Limits from the plugin system: one `sleep.enter` handler per plugin (so one
+Limits from the plugin system (weather, vakantie, school and school-sleep together
+use all 4 handlers of one sleep): one `sleep.enter` handler per plugin (so one
 image per plugin), up to 8 subscribed plugins, 4 handlers per sleep (extra
 informers refresh on the next sleep), 1 MB per download.

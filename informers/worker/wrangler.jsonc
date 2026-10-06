@@ -5,5 +5,7 @@
   "compatibility_date": "2026-09-01",
   "workers_dev": true,
   "preview_urls": false,
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+  // School news pushed by informers/school (key "data"). Secrets: SCHOOL_PUSH_KEY, SCHOOL_READ_KEY.
+  "kv_namespaces": [{ "binding": "SCHOOL", "id": "204ac41b6547421487d84a914a02306a" }]
 }
