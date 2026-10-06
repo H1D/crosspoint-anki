@@ -501,7 +501,7 @@ void AnkiReviewActivity::loop() {
         requestUpdate();
         return;
       }
-      buttonNavigator.onNextRelease([this] {
+      buttonNavigator.onRelease({MappedInputManager::Button::NavNext}, [this] {
         if (currentPage + 1 < totalPages) {
           currentPage++;
           requestUpdate();

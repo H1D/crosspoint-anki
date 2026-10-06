@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "CrossPointSettings.h"
+#include "HapticFeedback.h"
 #include "activities/ActivityResult.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -263,10 +264,12 @@ void DictionaryDefinitionActivity::loop() {
     }
     if (tx < renderer.getScreenWidth() / 3) {
       if (currentPage > 0) {
+        haptic_feedback::touchAction();
         currentPage--;
         requestUpdate();
       }
     } else if (currentPage + 1 < totalPages) {
+      haptic_feedback::touchAction();
       currentPage++;
       requestUpdate();
     }
