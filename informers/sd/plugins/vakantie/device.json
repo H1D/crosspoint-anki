@@ -1,0 +1,15 @@
+{
+  "title": "Holiday countdown (Vakantie)",
+  "description": "Days to the next school holiday",
+  "config": {
+    "file": "config.json"
+  },
+  "events": {
+    "sleep.enter": {
+      "download": {
+        "url": "{cfg.server}/vakantie.bmp?regio={cfg.regio}&depth={cfg.depth}&lang={cfg.lang}",
+        "dest": "{cfg.dest}"
+      }
+    }
+  }
+}

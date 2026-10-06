@@ -1,0 +1,8 @@
+{
+  "server": "https://crosspoint-informers.doorcomp.workers.dev",
+  "kid": "CHILD",
+  "key": "READ-KEY",
+  "depth": "2",
+  "lang": "nl",
+  "dest": "/informers/3-school.bmp"
+}

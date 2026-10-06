@@ -1,0 +1,19 @@
+{
+  "title": "School news (Schoolnieuws)",
+  "description": "Parro news for one child",
+  "config": {
+    "file": "config.json"
+  },
+  "events": {
+    "sleep.enter": {
+      "download": {
+        "url": "{cfg.server}/school.bmp?kid={cfg.kid}&key={cfg.key}&depth={cfg.depth}&lang={cfg.lang}",
+        "dest": "{cfg.dest}"
+      },
+      "wake": [
+        "07:55",
+        "19:05"
+      ]
+    }
+  }
+}

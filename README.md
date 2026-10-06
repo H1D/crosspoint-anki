@@ -1,7 +1,7 @@
 # crosspoint-anki
 
 [CrossPoint Reader](https://github.com/crosspoint-reader/crosspoint-reader) firmware with [Anki](https://apps.ankiweb.net/) built in.
-Everything else is stock CrossPoint ([upstream README](https://github.com/crosspoint-reader/crosspoint-reader#readme)).
+Plus [informers](#informers): weather, school news and other screens refreshed while the reader sleeps. Everything else is stock CrossPoint ([upstream README](https://github.com/crosspoint-reader/crosspoint-reader#readme)).
 
 **Needs a server on your network:** either [AnkiDo](https://github.com/H1D/AnkiDo) (syncs with AnkiWeb for you) or Anki desktop with the [AnkiConnect](https://ankiweb.net/shared/info/2055492159) add-on (the reader talks to Anki on your PC directly; AnkiConnect must listen on your LAN address, see its `webBindAddress` setting).
 
@@ -15,6 +15,19 @@ Everything else is stock CrossPoint ([upstream README](https://github.com/crossp
 | <img src="docs/anki/img/add-word.gif" width="400"> | **Add a word from a book.** Long-press a word (or reader menu → Add to Anki): its translation opens with an **Add to Anki** button. The add screen previews the card (front: the word's dictionary form, the example sentence, back: just its translations) above your accounts. Tick one or more, each row shows its deck (hold a row to pick another; the last deck used is remembered), **Add**. |
 | <img src="docs/anki/img/dictionary.gif" width="400"> | **Dictionaries per book language.** Put one [StarDict](docs/dictionary.md) dictionary per language in `/dictionaries/` ([WikDict](https://download.wikdict.com/dictionaries/stardict/) has most pairs); each book uses the one for its own language. Inflected words find their dictionary form (Dutch *staarde* → *staren*, *weilanden* → *weiland*; English *walked* → *walk*), and WikDict entries show as meaning → translations. Works without Anki too: long-press looks the word up. |
 | <img src="docs/anki/img/settings.png" width="400"> | **Offline first.** Cards are cached on the SD card; grades and new notes queue up and sync on demand, when you leave the review screen, or when the device goes to sleep. |
+
+## Informers
+
+Small glanceable screens drawn by a Cloudflare Worker and shown as images: the reader downloads them each time it goes to sleep, and wakes itself at times a plugin asks for to refresh them. Adding one needs no firmware build: a Worker module plus an SD-card plugin folder ([informers/README.md](informers/README.md)). Every informer has 4-level gray and black-and-white versions, in Dutch or English (`lang` in the plugin's `config.json`).
+
+| | | |
+|---|---|---|
+| <img src="docs/informers/img/weather.png" width="240"> | <img src="docs/informers/img/holidays.png" width="240"> | <img src="docs/informers/img/file-browser.png" width="240"> |
+| **Weather** for a child: temperature, rain in the next 2 hours (Buienalarm), what to wear, the next 4 days (Buienradar). | **Holiday countdown**: days to the next Dutch school holiday for your region. | **Open them** from Browse Files → `informers`; Left and Right flip between them. Any one can be the sleep screen. |
+| <img src="docs/informers/img/school-emma.png" width="240"> | <img src="docs/informers/img/school-noah.png" width="240"> | |
+| **School news per child** from Parro, rewritten short and simple. "No school tomorrow" takes over the top. | The same evening on a sibling's reader: only news for that child's class. | A job on a home server pulls Parro at 07:50 and 19:00 ([informers/school](informers/school/README.md)); the readers wake at 07:55 and 19:05 to show it on their sleep screen. |
+
+Plugin refresh times are a firmware feature (`"wake": ["07:55", "19:05"]` on a `sleep.enter` handler, [docs/plugin-events.md](docs/plugin-events.md)), built on the timer-wake primitive from upstream [#3820](https://github.com/crosspoint-reader/crosspoint-reader/pull/3820). Screenshots show demo data.
 
 ## Flash
 

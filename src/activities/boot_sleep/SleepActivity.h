@@ -8,8 +8,11 @@ class HalFile;
 
 class SleepActivity final : public Activity {
  public:
-  explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false)
-      : Activity("Sleep", renderer, mappedInput), fromTimeout(fromTimeout) {}
+  // showPopup=false skips the "going to sleep" popup (refresh wakes redraw
+  // the sleep screen with nobody looking).
+  explicit SleepActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, bool fromTimeout = false,
+                         bool showPopup = true)
+      : Activity("Sleep", renderer, mappedInput), fromTimeout(fromTimeout), showPopup(showPopup) {}
   void onEnter() override;
 
  private:
@@ -25,4 +28,5 @@ class SleepActivity final : public Activity {
   void renderBlankSleepScreen() const;
 
   bool fromTimeout = false;
+  bool showPopup = true;
 };

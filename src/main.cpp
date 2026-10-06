@@ -17,6 +17,7 @@
 #include <I18n.h>
 #include <Logging.h>
 #include <SPI.h>
+#include <TrustedTime.h>
 #include <VectorFontSupport.h>
 #include <WiFi.h>
 #include <XteinkDetect.h>
@@ -43,6 +44,7 @@
 #include "fontIds.h"
 #include "platform/UsbSerialJtagHandoff.h"
 #include "util/ButtonNavigator.h"
+#include "util/PluginEvents.h"
 #include "util/ScreenshotUtil.h"
 #include "util/Timezones.h"
 
@@ -147,7 +149,8 @@ constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
 constexpr uint32_t SILENT_REBOOT_TARGET_SETTINGS = 2;
-constexpr uint32_t SILENT_REBOOT_TARGET_ANKI = 3;
+constexpr uint32_t SILENT_REBOOT_TARGET_JOIN_NETWORK = 3;
+constexpr uint32_t SILENT_REBOOT_TARGET_ANKI = 4;
 constexpr uint32_t SILENT_REBOOT_TARGET_MAX = SILENT_REBOOT_TARGET_ANKI;
 constexpr uint32_t SILENT_REBOOT_LIGHT_ON = 1U << 0;
 
@@ -203,6 +206,21 @@ void silentRestartToReader() { silentRestartTo(SILENT_REBOOT_TARGET_READER, "rea
 void silentRestartToSettings() { silentRestartTo(SILENT_REBOOT_TARGET_SETTINGS, "settings"); }
 
 void silentRestartToAnki() { silentRestartTo(SILENT_REBOOT_TARGET_ANKI, "anki"); }
+
+void silentRestartToJoinNetwork() {
+  if (deepSleepInProgress) return;
+#if FREEINK_CAP_TOUCH
+  // A software reset would cycle touch/frontlight rails; those boards proceed
+  // into Join Network without the fresh-heap reboot (return, don't stop WiFi —
+  // this runs on the way *in*, unlike the exit-time silentRestart()).
+  if (BoardConfig::hasTouch()) return;
+#endif
+  armSilentReboot(SILENT_REBOOT_TARGET_JOIN_NETWORK);
+  LOG_DBG("MAIN", "Silent restart (target=join-network)");
+  GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  delay(50);
+  ESP.restart();
+}
 
 void restartToHomeAfterStorageHandoff() {
   if (deepSleepInProgress) return;  // sleeping supersedes the storage handoff reboot
@@ -299,15 +317,18 @@ static void syncAnkiBeforeSleep(const bool showPopup) {
   constexpr unsigned long SYNC_BUDGET_MS = 15000;
   constexpr uint32_t REQUEST_TIMEOUT_MS = 4000;
   if (showPopup) GUI.drawPopup(renderer, tr(STR_ANKI_SYNCING));
-  WiFi.mode(WIFI_STA);
-  if (credential->password.empty()) {
-    WiFi.begin(credential->ssid.c_str());
-  } else {
-    WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
-  }
-  const unsigned long joinStart = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - joinStart < JOIN_TIMEOUT_MS) {
-    delay(100);
+  // Sleep plugin-event delivery may already have joined; reuse that link.
+  if (WiFi.status() != WL_CONNECTED) {
+    WiFi.mode(WIFI_STA);
+    if (credential->password.empty()) {
+      WiFi.begin(credential->ssid.c_str());
+    } else {
+      WiFi.begin(credential->ssid.c_str(), credential->password.c_str());
+    }
+    const unsigned long joinStart = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - joinStart < JOIN_TIMEOUT_MS) {
+      delay(100);
+    }
   }
   if (WiFi.status() == WL_CONNECTED) {
     WiFi.setSleep(false);
@@ -339,10 +360,148 @@ static void syncAnkiBeforeSleep(const bool showPopup) {
   WiFi.mode(WIFI_OFF);
 }
 
+// Joins the last-connected saved network with a 10-second deadline, for the
+// sleep paths. Skipped on low battery; never blocks longer than the deadline.
+static bool joinSavedWifi(const bool showPopup) {
+  if (powerManager.getBatteryPercentage() < 20) return false;
+  // Every wake is a fresh boot, so the store is only populated here if the WiFi
+  // screen was opened since; load it or the join is always skipped.
+  WIFI_STORE.loadFromFile();
+  const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
+  if (!cred) return false;
+
+  if (showPopup) GUI.drawPopup(renderer, tr(STR_LOADING_POPUP));
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+  const unsigned long joinDeadline = millis() + 10000;
+  while (WiFi.status() != WL_CONNECTED && millis() < joinDeadline) {
+    delay(100);
+  }
+  if (WiFi.status() == WL_CONNECTED) return true;
+  LOG_DBG("MAIN", "Sleep-event WiFi join timed out; deferring delivery");
+  return false;
+}
+
+// Plugin-event delivery on the way into deep sleep. sleep.enter is delivered
+// now — over the live connection, or by bringing WiFi up when a plugin
+// subscribes (e.g. fetching a fresh /sleep.bmp so THIS sleep shows it — the
+// drain runs before goToSleep() renders the sleep screen). The connect path
+// is bounded (join deadline + drain event budget), skipped on low battery,
+// and sleep is never blocked on the network: a failed join or delivery just
+// sleeps with the previous image and the queued events retry on the next
+// drain (at-least-once). The caller's WiFi shutdown tears the radio down
+// either way. Deferrable events already queued (reader.exit) ride along in
+// the same drain.
+static void deliverSleepPluginEvents() {
+  // Activity-owned state must be queued before sleep.enter and before this
+  // same-sleep drain. The hook is idempotent with ordinary activity teardown.
+  activityManager.prepareForSleep();
+
+  // Sleeping straight out of a book is the common flow, but the reader's own
+  // reader.exit only fires later, inside goToSleep() — after this drain. Carry
+  // the book and progress on sleep.enter itself so a sync handler bound to it
+  // pushes current progress on THIS connection, not the next one.
+  pluginevents::Var vars[2];
+  size_t varCount = 0;
+  char percent[8];
+  const ScreenshotInfo info = activityManager.getScreenshotInfo();
+  if (info.readerType != ScreenshotInfo::ReaderType::None && !APP_STATE.openEpubPath.empty()) {
+    snprintf(percent, sizeof(percent), "%d", info.progressPercent);
+    vars[varCount++] = {"book", APP_STATE.openEpubPath.c_str()};
+    vars[varCount++] = {"percent", percent};
+  }
+  pluginevents::emit(pluginevents::Event::SleepEnter, vars, varCount);
+  if (WiFi.status() == WL_CONNECTED) {
+    pluginevents::drain(&renderer);
+    return;
+  }
+  // Any connect-flagged queued event justifies the join, not only
+  // sleep.enter: reader.session is queued while reading and delivered on this
+  // same sleep, and a progress-sync plugin usually subscribes to it alone.
+  if (!pluginevents::wantsConnectAny()) return;
+  if (joinSavedWifi(/*showPopup=*/true)) {
+    trustedtime::startSync();  // snap the clock floor while the network is up
+    pluginevents::drain(&renderer);
+  }
+}
+
+// Plugin refresh wakes ("wake" times on sleep.enter handlers). The target
+// survives deep sleep in RTC memory so a timer wake can tell an early wake
+// (the sleep timer runs off an RC oscillator and drifts) from a due one.
+RTC_DATA_ATTR int64_t refreshWakeTarget = 0;
+
+// Deep-sleep timer for the next plugin refresh time, in microseconds; 0 arms
+// nothing. Needs a trustworthy clock and enough battery for the WiFi join.
+static uint64_t armRefreshWake() {
+  refreshWakeTarget = 0;
+  if (powerManager.getBatteryPercentage() < 20) return 0;
+  const int64_t now = trustedtime::trustedNow();
+  if (now == 0) return 0;
+  const int64_t target = pluginevents::nextWake(now);
+  if (target <= now) return 0;
+  refreshWakeTarget = target;
+  LOG_DBG("MAIN", "Refresh wake in %lld s", static_cast<long long>(target - now));
+  return static_cast<uint64_t>(target - now) * 1000000ULL;
+}
+
+static void shutDownWifi() {
+  if (WiFi.getMode() != WIFI_MODE_NULL) {
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+  }
+}
+
+void setupDisplayAndFonts(bool seamless);
+
+// Woken by the refresh timer: deliver sleep.enter again (fresh informer
+// images) without lighting up the UI, redraw the sleep screen when it shows
+// /sleep.bmp, and sleep until the next refresh time. The previous sleep's
+// APP_STATE is left untouched, so the next button wake resumes as before.
+static void runRefreshWake() {
+  setupDisplayAndFonts(/*seamless=*/true);
+  if (joinSavedWifi(/*showPopup=*/false)) {
+    const bool synced = trustedtime::syncNow(5000);
+    const int64_t now = trustedtime::trustedNow();
+    if (synced && refreshWakeTarget > 0 && now > 0 && now + 120 < refreshWakeTarget) {
+      // Woke early: the data for this refresh may not exist yet. Sleep the rest.
+      const int64_t target = refreshWakeTarget;
+      LOG_DBG("MAIN", "Refresh wake %lld s early; sleeping again", static_cast<long long>(target - now));
+      shutDownWifi();
+      Storage.prepareForDeepSleep();
+      refreshWakeTarget = target;
+      powerManager.startDeepSleep(gpio, static_cast<uint64_t>(target - now) * 1000000ULL);
+      return;
+    }
+    pluginevents::emit(pluginevents::Event::SleepEnter, nullptr, 0);
+    pluginevents::drain(nullptr);
+  }
+  shutDownWifi();
+  trustedtime::note();
+
+  const bool showsSleepImage =
+      SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::CUSTOM ||
+      (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::COVER_CUSTOM && !APP_STATE.lastSleepFromReader);
+  if (showsSleepImage) {
+    deepSleepInProgress = true;
+    activityManager.goToSleep(/*fromTimeout=*/false, /*showPopup=*/false);
+  }
+  halTiltSensor.deepSleep();
+  display.deepSleep();
+  Storage.prepareForDeepSleep();
+  LOG_DBG("MAIN", "Refresh wake done; entering deep sleep");
+  powerManager.startDeepSleep(gpio, armRefreshWake());
+}
+
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+
+  // Sleep may end in a power-off (battery death, latch); persist the clock
+  // floor now so a later cold boot resumes from it.
+  trustedtime::note();
+
+  deliverSleepPluginEvents();
 
   const bool isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
@@ -370,17 +529,14 @@ void enterDeepSleep(bool fromTimeout = false) {
 
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
-  if (WiFi.getMode() != WIFI_MODE_NULL) {
-    WiFi.disconnect(true);
-    WiFi.mode(WIFI_OFF);
-  }
+  shutDownWifi();
 
   halTiltSensor.deepSleep();
   display.deepSleep();
   Storage.prepareForDeepSleep();
   LOG_DBG("MAIN", "Entering deep sleep");
 
-  powerManager.startDeepSleep(gpio);
+  powerManager.startDeepSleep(gpio, armRefreshWake());
 }
 
 void setupDisplayAndFonts(bool seamless = false) {
@@ -523,13 +679,18 @@ void setup() {
   ANKI_STORE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+  pluginevents::refreshSubscriptions();
+  // Restore the monotonic clock floor before anything reads time() (event
+  // timestamps, loan-expiry checks).
+  trustedtime::init();
 
   // Brightness and warmth are always restored. A normal wake starts with the
   // light off unless Restore Light on Wake is enabled; silent maintenance
   // reboots replay the live state captured at restart, so they neither go dark
   // nor light up against the user's wake preference.
-  const bool restoreLightOn =
-      isSilentReboot ? silentRebootLightOn : (SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
+  const bool restoreLightOn = isSilentReboot ? silentRebootLightOn
+                                             : (wakeupReason != HalGPIO::WakeupReason::Timer &&
+                                                SETTINGS.frontlightOn != 0 && SETTINGS.frontlightRestoreOnWake != 0);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
 
   switch (wakeupReason) {
@@ -539,17 +700,24 @@ void setup() {
       if (!wakeHoldVerified && SETTINGS.shortPwrBtn != CrossPointSettings::SHORT_PWRBTN::SLEEP) {
         LOG_DBG("MAIN", "Power-button wake not held through verification, sleeping");
         Storage.prepareForDeepSleep();
-        powerManager.startDeepSleep(gpio);
+        powerManager.startDeepSleep(gpio, armRefreshWake());
       }
       wakePowerReleasePending = true;
       break;
+    case HalGPIO::WakeupReason::Timer:
+      // Only plugin refresh times arm the timer (armRefreshWake()).
+      LOG_DBG("MAIN", "Wakeup reason: Timer");
+      runRefreshWake();
+      return;
     case HalGPIO::WakeupReason::AfterUSBPower:
       // Most devices return to sleep after a USB-powered cold boot.
       LOG_DBG("MAIN", "Wakeup reason: After USB Power");
-#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4
+#if FREEINK_DEVICE_X4PRO || FREEINK_DEVICE_X4CLASSIC || FREEINK_DEVICE_PAPERMONO || FREEINK_DEVICE_EEGO_A4 || \
+    FREEINK_DEVICE_METALIO_EINK4
       // X4 Pro must stay awake so USB Serial/JTAG remains available after leaving
       // USB Drive and reconnecting the cable. Paper Mono has no armable GPIO wake
-      // (its button is behind the PMIC). EEGO A4's post-flash reset reads as
+      // (its button is behind the PMIC). Metalio also needs native USB available
+      // after a USB-powered boot. EEGO A4's post-flash reset reads as
       // POWERON (native-USB), so a flash would otherwise be misclassified as a
       // USB-power cold boot and sleep. Sleeping any of these here would strand
       // the device in a USB-replug boot loop (or sleep right after a flash).
@@ -623,6 +791,10 @@ void setup() {
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_READER &&
              !APP_STATE.openEpubPath.empty()) {
     activityManager.goToReader(APP_STATE.openEpubPath);
+  } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_JOIN_NETWORK) {
+    // Rebooted on the way *into* File Transfer > Join Network for a fresh heap;
+    // resume that flow directly instead of landing on home.
+    activityManager.goToJoinNetwork();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_SETTINGS) {
     // Back out of the WiFi rows and the user is where they left off, not on Home.
     activityManager.goToSettings();
@@ -885,10 +1057,21 @@ void loop() {
     }
   }
 
+  bool skipLoopDelay = false;
+  {
+    RenderLock lock(RenderLock::Mode::Try);
+    if (!lock.ownsLock()) {
+      // Let rendering advance without treating lock contention as idle.
+      delay(10);
+      return;
+    }
+    skipLoopDelay = activityManager.skipLoopDelay();
+  }
+
   // Add delay at the end of the loop to prevent tight spinning
   // When an activity requests skip loop delay (e.g., webserver running), use yield() for faster response
   // Otherwise, use longer delay to save power
-  if (activityManager.skipLoopDelay()) {
+  if (skipLoopDelay) {
     powerManager.setPowerSaving(false);  // Make sure we're at full performance when skipLoopDelay is requested
     yield();                             // Give FreeRTOS a chance to run tasks, but return immediately
   } else {

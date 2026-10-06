@@ -1,0 +1,15 @@
+{
+  "title": "Weather (Weer)",
+  "description": "Kids forecast, new on each sleep",
+  "config": {
+    "file": "config.json"
+  },
+  "events": {
+    "sleep.enter": {
+      "download": {
+        "url": "{cfg.server}/weather.bmp?lat={cfg.lat}&lon={cfg.lon}&place={cfg.place}&depth={cfg.depth}&lang={cfg.lang}",
+        "dest": "{cfg.dest}"
+      }
+    }
+  }
+}
