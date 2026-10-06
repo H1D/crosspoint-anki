@@ -398,6 +398,9 @@ static void deliverSleepPluginEvents() {
   // same sleep, and a progress-sync plugin usually subscribes to it alone.
   if (!pluginevents::wantsConnectAny()) return;
   if (powerManager.getBatteryPercentage() < 20) return;
+  // Every wake is a fresh boot, so the store is only populated here if the WiFi
+  // screen was opened since; load it or the join is always skipped.
+  WIFI_STORE.loadFromFile();
   const auto cred = WIFI_STORE.findCredential(WIFI_STORE.getLastConnectedSsid());
   if (!cred) return;
 
