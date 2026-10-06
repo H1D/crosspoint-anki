@@ -12,6 +12,7 @@ Settings, in config.json next to this file:
 - server: the informer Worker address
 - lat, lon: your location (Netherlands only; the data covers NL)
 - place: name at the top of the image (use %20 for spaces)
+- depth: 2 for 4-level gray (smooth text, gray shading; X4 and other gray panels), 1 for black and white
 - dest: where the image is saved
 
 The image refreshes only when the reader sleeps; it shows the time it was made. Needs a battery of at least 20% and a saved WiFi network.

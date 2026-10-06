@@ -10,12 +10,18 @@ build.
 
 - `worker/` is the Worker, deployed as
   `https://crosspoint-informers.doorcomp.workers.dev`. `GET /<name>.bmp`
-  returns a 480x800 1-bit BMP; `GET /` lists the informers. No dependencies:
+  returns a 480x800 BMP; `GET /` lists the informers. `depth=2` returns a
+  2-bit BMP with the panel's four native grays (anti-aliased text, gray
+  fills); anything else returns 1-bit black and white with grays dithered.
+  The reader shows 2-bit images in real gray in the image viewer and on the
+  sleep screen (when the sleep cover filter is off). No dependencies:
   `src/canvas.js` draws shapes and text into a pixel buffer, text comes from
   glyph bitmaps baked from Noto Sans (`scripts/bake_fonts.py` → `src/fonts.js`),
   `src/icons.js` draws weather icons. Responses are cached for 5 minutes.
 - `worker/src/informers/<name>.js` is one informer: a default export with
-  `render(params)` returning a `Canvas`. Register it in `src/index.js`.
+  `render(canvas, params, env)` that draws into the canvas it is given (check
+  `canvas.gray` to add shading only in gray mode). Register it in
+  `src/index.js`.
 - `sd/plugins/<name>/` is the plugin folder to copy onto the SD card.
   `device.json` declares the download; `config.json` holds the server address,
   query parameters, and destination path.
@@ -26,19 +32,26 @@ build.
 
 | Name | Data | Query |
 | --- | --- | --- |
-| `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `demo=rain` |
+| `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `depth`, `demo=rain` |
 
 ## Develop and deploy
 
 ```sh
 cd informers/worker
-bun scripts/render.mjs weather /tmp/weather.bmp "lat=52.37&lon=4.90&place=Amsterdam"
-CLOUDFLARE_API_TOKEN=... CLOUDFLARE_ACCOUNT_ID=8a97ec747d5396c10e3e0b739d75ef22 wrangler deploy
+node scripts/render.mjs weather /tmp/weather.bmp "lat=52.37&lon=4.90&place=Amsterdam&depth=2"
+python3 scripts/preview.py /tmp/weather.bmp /tmp/weather.png   # Pillow cannot open 2-bit BMPs
+CLOUDFLARE_API_TOKEN="$(systemd-creds --user decrypt ~/.config/agent-secrets/cloudflare/crosspoint-informers-hermes.cred -)" scripts/deploy.sh
 ```
 
-`render.mjs` runs an informer under Bun without Wrangler, fetching live data.
-The deploy token is the account-owned `crosspoint-informers-deploy` token
-(Workers Scripts read/write only).
+`render.mjs` runs an informer under Node or Bun without Wrangler, fetching live
+data. The deploy token is the account-owned `crosspoint-informers-hermes`
+token, limited to this one Worker (Hermes keeps a copy in
+`~/.hermes/secrets/crosspoint-informers-cf.env`). That token cannot read the
+account's workers.dev subdomain, so plain `wrangler deploy` fails;
+`deploy.sh` uploads a version and promotes it.
+
+To add an informer, follow `skills/crosspoint-informer/SKILL.md` (also
+installed for Hermes).
 
 ## On the reader
 

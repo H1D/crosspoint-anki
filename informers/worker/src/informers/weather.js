@@ -1,7 +1,7 @@
 // Weather for a child: simple Dutch, big icons, rain in the next two hours.
 // Data: Buienradar (station measurements, 5-day forecast, sun times) and
 // Buienalarm (5-minute rain nowcast).
-import { BLACK, Canvas, GRAY } from "../canvas.js";
+import { DARK_GRAY, GRAY } from "../canvas.js";
 import * as F from "../fonts.js";
 import { drawIcon, drop, iconFor } from "../icons.js";
 import { clock, dateLong, weekdayShort } from "../time.js";
@@ -91,7 +91,7 @@ function rainChart(c, slots, x, y, w, h) {
   slots.forEach((s, i) => {
     if (s.mm < RAIN_MM) return;
     const bar = Math.max(4, (Math.sqrt(s.mm) / Math.sqrt(max)) * h);
-    c.rect(x + i * step + 1, y + h - bar, step - 2, bar, GRAY);
+    c.rect(x + i * step + 1, y + h - bar, step - 2, bar, c.gray ? GRAY : DARK_GRAY);
   });
   slots.forEach((s, i) => {
     if (i % 6) return;
@@ -124,7 +124,7 @@ function demoRain() {
 export default {
   title: "Weer",
   // Query: lat, lon, place (label at the top), demo=rain (fake shower).
-  async render(params) {
+  async render(c, params) {
     const lat = Number(params.get("lat") ?? 52.37);
     const lon = Number(params.get("lon") ?? 4.9);
     const place = params.get("place") || "";
@@ -151,7 +151,6 @@ export default {
     if (params.get("demo") === "rain") slots.splice(0, slots.length, ...demoRain());
     const rainSoon = slots.slice(0, 12).some((s) => s.mm >= RAIN_MM);
 
-    const c = new Canvas();
     const W = c.width;
 
     c.text(place ? `Het weer in ${place}` : "Het weer", 24, 50, F.title);
@@ -174,6 +173,7 @@ export default {
       if (tipLines.length + lines.length > 2) break;
       tipLines.push(...lines);
     }
+    if (c.gray) c.rect(20, 606, W - 40, 20 + tipLines.length * 34, GRAY);
     c.frame(20, 606, W - 40, 20 + tipLines.length * 34, 3);
     tipLines.forEach((t, i) => c.text(t, W / 2, 640 + i * 34, F.bodyBold, { align: "center" }));
 

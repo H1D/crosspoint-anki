@@ -1,6 +1,8 @@
 // Informer screens for CrossPoint readers: GET /<name>.bmp returns a 480x800
-// 1-bit BMP that an SD plugin downloads on sleep. Register new informers here.
+// BMP (1-bit, or 4-level gray with depth=2) that an SD plugin downloads on
+// sleep. Register new informers here.
 import weather from "./informers/weather.js";
+import { renderBmp } from "./render.js";
 
 const INFORMERS = { weather };
 const CACHE_SECONDS = 300;
@@ -20,15 +22,15 @@ export default {
     const cached = await cache.match(request);
     if (cached) return cached;
 
-    let canvas;
+    let bmp;
     try {
-      canvas = await informer.render(url.searchParams, env);
+      bmp = await renderBmp(informer, url.searchParams, env);
     } catch (err) {
       console.error(match[1], err);
       // A non-2xx keeps the reader's previous image in place.
       return new Response("upstream data unavailable", { status: 502 });
     }
-    const res = new Response(canvas.toBmp(), {
+    const res = new Response(bmp, {
       headers: { "Content-Type": "image/bmp", "Cache-Control": `public, max-age=${CACHE_SECONDS}` },
     });
     ctx.waitUntil(cache.put(request, res.clone()));

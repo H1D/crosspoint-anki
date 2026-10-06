@@ -3,5 +3,6 @@
   "lat": "52.37",
   "lon": "4.90",
   "place": "Amsterdam",
+  "depth": "2",
   "dest": "/informers/1-weather.bmp"
 }

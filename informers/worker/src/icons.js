@@ -1,5 +1,5 @@
 // Weather icons drawn from circles and lines, sized by `s` (about the icon width).
-import { BLACK, WHITE } from "./canvas.js";
+import { BLACK, GRAY, WHITE } from "./canvas.js";
 
 function cloudShape(c, cx, cy, s, grow, v) {
   const blobs = [
@@ -13,7 +13,7 @@ function cloudShape(c, cx, cy, s, grow, v) {
 
 function cloud(c, cx, cy, s, t) {
   cloudShape(c, cx, cy, s, 0, BLACK);
-  cloudShape(c, cx, cy, s, -t, WHITE);
+  cloudShape(c, cx, cy, s, -t, c.gray ? GRAY : WHITE);
 }
 
 function sun(c, cx, cy, s, t) {
