@@ -7,7 +7,7 @@
   "events": {
     "sleep.enter": {
       "download": {
-        "url": "{cfg.server}/vakantie.bmp?regio={cfg.regio}&depth={cfg.depth}",
+        "url": "{cfg.server}/vakantie.bmp?regio={cfg.regio}&depth={cfg.depth}&lang={cfg.lang}",
         "dest": "{cfg.dest}"
       }
     }

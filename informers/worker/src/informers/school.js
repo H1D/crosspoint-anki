@@ -8,13 +8,39 @@
 // half of the screen in white on black, so it cannot be missed.
 import { BLACK, DARK_GRAY, GRAY, WHITE } from "../canvas.js";
 import * as F from "../fonts.js";
-import { clock, dateLong } from "../time.js";
+import { clock, dateLong, langOf } from "../time.js";
 
 const KEY = "data";
 const DAY = 86400000;
 const STALE_HOURS = 30; // two pulls a day; older than this means the job is not running
 const KINDS = ["alarm", "todo", "event", "info"];
-const LABEL = { alarm: "LET OP", todo: "MEENEMEN / DOEN", event: "ACTIVITEIT", info: "INFO" };
+// Screen text; the news itself arrives already rewritten (Dutch from the job).
+const T = {
+  nl: {
+    label: { alarm: "LET OP", todo: "MEENEMEN / DOEN", event: "ACTIVITEIT", info: "INFO" },
+    rel: ["vandaag", "morgen", "overmorgen"],
+    weekday: ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"],
+    month: ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"],
+    forKid: (n) => `voor ${n}`,
+    at: "om",
+    empty: "Geen nieuws van school. Fijne dag!",
+    pulled: (t) => `nieuws van ${t}`,
+    stale: (d) => `Let op: oud nieuws (${d})`,
+    more: (n) => `+${n} meer in Parro`,
+  },
+  en: {
+    label: { alarm: "HEADS UP", todo: "BRING / DO", event: "ACTIVITY", info: "INFO" },
+    rel: ["today", "tomorrow", "day after tomorrow"],
+    weekday: ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"],
+    month: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
+    forKid: (n) => `for ${n}`,
+    at: "at",
+    empty: "No news from school. Have a nice day!",
+    pulled: (t) => `news from ${t}`,
+    stale: (d) => `Old news! (${d})`,
+    more: (n) => `+${n} more in Parro`,
+  },
+};
 
 export class HttpError extends Error {
   constructor(status, message) {
@@ -28,18 +54,13 @@ const dayNr = (iso) => {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   return Math.floor(Date.UTC(y, m - 1, d) / DAY);
 };
-const WEEKDAY = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
-const MONTH = ["jan", "feb", "mrt", "apr", "mei", "jun", "jul", "aug", "sep", "okt", "nov", "dec"];
-
 // "vandaag", "morgen", "overmorgen", "vrijdag" (this week), or "wo 14 okt".
-function relDay(day, today) {
+function relDay(day, today, L) {
   const n = dayNr(day) - today;
-  if (n === 0) return "vandaag";
-  if (n === 1) return "morgen";
-  if (n === 2) return "overmorgen";
+  if (n >= 0 && n < 3) return L.rel[n];
   const d = new Date(dayNr(day) * DAY);
-  if (n > 2 && n < 7) return WEEKDAY[d.getUTCDay()];
-  return `${WEEKDAY[d.getUTCDay()].slice(0, 2)} ${d.getUTCDate()} ${MONTH[d.getUTCMonth()]}`;
+  if (n > 2 && n < 7) return L.weekday[d.getUTCDay()];
+  return `${L.weekday[d.getUTCDay()].slice(0, L === T.en ? 3 : 2)} ${d.getUTCDate()} ${L.month[d.getUTCMonth()]}`;
 }
 
 // The fonts hold ASCII plus a few accented letters. Fold everything else
@@ -123,9 +144,9 @@ export function pick(items, today) {
 }
 
 // White on black across the top: "MORGEN" / "Geen school", plus one line of detail.
-function alarmBlock(c, alarm, item, today, y) {
+function alarmBlock(c, alarm, item, today, y, L) {
   const W = c.width;
-  const when = relDay(alarm.day, today).toUpperCase();
+  const when = relDay(alarm.day, today, L).toUpperCase();
   // The big font when it fits on one line, else the title font over up to two.
   let font = F.big;
   let what = wrap(c, alarm.what || item.title, font, W - 72, 2);
@@ -152,7 +173,7 @@ function alarmBlock(c, alarm, item, today, y) {
 }
 
 // One news item: label and day on top, bold title, up to `lines` lines of text.
-function itemBlock(c, it, today, y, lines, bottom) {
+function itemBlock(c, it, today, y, lines, bottom, L) {
   const W = c.width;
   const title = wrap(c, it.title, F.bodyBold, W - 48, 1);
   let text = wrap(c, it.text, F.body, W - 48, lines);
@@ -162,13 +183,13 @@ function itemBlock(c, it, today, y, lines, bottom) {
   const h = height();
   if (y + h > bottom) return null;
   const isAlarm = it.kind === "alarm";
-  const label = LABEL[it.kind] ?? "INFO";
+  const label = L.label[it.kind] ?? L.label.info;
   const lw = c.textWidth(label, F.small) + 16;
   if (isAlarm) c.rect(24, y, lw, 26, BLACK);
   else if (c.gray) c.rect(24, y, lw, 26, GRAY);
   else c.frame(24, y, lw, 26, 1);
   c.text(label, 32, y + 20, F.small, { color: isAlarm ? WHITE : BLACK });
-  const when = it.day ? relDay(it.day, today) : it.from ? fold(it.from) : "";
+  const when = it.day ? relDay(it.day, today, L) : it.from ? fold(it.from) : "";
   if (when) c.text(when, W - 24, y + 20, F.small, { align: "right" });
   let by = y + 26 + 29;
   c.text(title[0] ?? "", 24, by, F.bodyBold);
@@ -184,8 +205,10 @@ function itemBlock(c, it, today, y, lines, bottom) {
 export default {
   title: "School",
   // Query: kid=<id> (as pushed by the job), key=<read key>, depth,
-  // vandaag=YYYY-MM-DD to pretend it is another day.
+  // vandaag=YYYY-MM-DD to pretend it is another day, lang=en.
   async render(c, params, env) {
+    const lang = langOf(params);
+    const L = T[lang];
     if (!env.SCHOOL_READ_KEY || params.get("key") !== env.SCHOOL_READ_KEY) throw new HttpError(403, "forbidden");
     const data = await env.SCHOOL.get(KEY, "json");
     if (!data) throw new Error("no school data pushed yet");
@@ -200,9 +223,9 @@ export default {
     const H = c.height;
 
     c.text("School", 24, 50, F.title);
-    c.text(`voor ${fold(kid.name)}`, W - 24, 48, F.bodyBold, { align: "right" });
-    c.text(dateLong(now), 24, 86, F.body);
-    c.text(`om ${clock(Date.now())}`, W - 24, 86, F.small, { align: "right" });
+    c.text(L.forKid(fold(kid.name)), W - 24, 48, F.bodyBold, { align: "right" });
+    c.text(dateLong(now, lang), 24, 86, F.body);
+    c.text(`${L.at} ${clock(Date.now())}`, W - 24, 86, F.small, { align: "right" });
     c.rect(24, 102, W - 48, 2);
 
     const { alarms, list } = pick(kid.items, today);
@@ -210,17 +233,17 @@ export default {
 
     // Today and tomorrow get the black block; later alarms sit at the top of the list.
     const urgent = alarms.filter((it) => dayNr(it.alarm.day) - today <= 1);
-    for (const it of urgent.slice(0, 2)) y = alarmBlock(c, it.alarm, it, today, y);
+    for (const it of urgent.slice(0, 2)) y = alarmBlock(c, it.alarm, it, today, y, L);
     const later = alarms.filter((it) => !urgent.includes(it)).map((it) => ({ ...it, kind: "alarm", day: it.alarm.day }));
     const queue = [...urgent.slice(2), ...later, ...list];
 
     const bottom = H - 46;
     if (!queue.length && !urgent.length) {
-      c.paragraph("Geen nieuws van school. Fijne dag!", 24, y + 60, W - 48, F.body);
+      c.paragraph(L.empty, 24, y + 60, W - 48, F.body);
     }
     let shown = 0;
     for (const it of queue) {
-      const next = itemBlock(c, it, today, y, 4, bottom);
+      const next = itemBlock(c, it, today, y, 4, bottom, L);
       if (next === null) break;
       y = next;
       shown++;
@@ -230,10 +253,10 @@ export default {
     // Footer: how fresh the news is, and what did not fit.
     c.rect(24, H - 40, W - 48, 1);
     const age = (now - Date.parse(data.updated)) / 3600000;
-    const pulled = `nieuws van ${clock(Date.parse(data.updated))}`;
-    const footer = age > STALE_HOURS ? `Let op: oud nieuws (${relDay(amsDate.format(Date.parse(data.updated)), today)})` : pulled;
+    const pulled = L.pulled(clock(Date.parse(data.updated)));
+    const footer = age > STALE_HOURS ? L.stale(relDay(amsDate.format(Date.parse(data.updated)), today, L)) : pulled;
     c.text(footer, 24, H - 12, age > STALE_HOURS ? F.bodyBold : F.small);
-    if (left > 0 && age <= STALE_HOURS) c.text(`+${left} meer in Parro`, W - 24, H - 12, F.small, { align: "right" });
+    if (left > 0 && age <= STALE_HOURS) c.text(L.more(left), W - 24, H - 12, F.small, { align: "right" });
     return c;
   },
 };

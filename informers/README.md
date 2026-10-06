@@ -71,8 +71,12 @@ installed for Hermes).
    between informers; files are ordered by name, hence the number prefixes.
 
 To show an informer as the sleep screen, set its `dest` to `/sleep.bmp` and
-set Sleep Screen to Custom. Images refresh only on sleep; each one prints the
-time it was rendered.
+set Sleep Screen to Custom. Images refresh each time the reader goes to sleep,
+and at the `wake` times a plugin lists (the school plugins ask for 07:55 and
+19:05): the reader wakes itself, downloads, redraws the sleep screen, and
+sleeps again (see `docs/plugin-events.md`). Each image prints the time it was
+rendered. Every informer takes `lang=en` for English (`lang` in each
+`config.json`); the default is Dutch.
 
 Limits from the plugin system (weather, vakantie, school and school-sleep together
 use all 4 handlers of one sleep): one `sleep.enter` handler per plugin (so one

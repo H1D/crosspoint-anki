@@ -212,7 +212,11 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
   8 subscribed plugins, 4 handlers per sleep (the rest on the next sleep),
   1 MB per download, config values are substituted without URL-encoding (use
   `%20` for spaces).
-- The download only happens on sleep, with battery at least 20% and a saved
-  WiFi network. There is no "refresh now".
+- The download happens on sleep, with battery at least 20% and a saved WiFi
+  network. To refresh while the reader sleeps, add `"wake": ["HH:MM", ...]`
+  (local time, up to 4) next to `download` in the `sleep.enter` handler; the
+  reader wakes itself then. Pick times just after the data changes.
+- Informers take `lang=en` for English; keep a `T = { nl, en }` table of screen
+  text (see `weather.js`) and pass `lang` through the plugin config.
 
 See `references/canvas-api.md` for the full drawing API.

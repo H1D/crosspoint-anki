@@ -7,7 +7,7 @@
   "events": {
     "sleep.enter": {
       "download": {
-        "url": "{cfg.server}/school.bmp?kid={cfg.kid}&key={cfg.key}&depth={cfg.depth}",
+        "url": "{cfg.server}/school.bmp?kid={cfg.kid}&key={cfg.key}&depth={cfg.depth}&lang={cfg.lang}",
         "dest": "{cfg.dest}"
       },
       "wake": [

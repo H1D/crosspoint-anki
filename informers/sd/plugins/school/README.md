@@ -14,6 +14,7 @@ Changing settings: edit config.json in this plugin's folder on a computer (take 
 - kid: which child this reader belongs to (the name the news service uses, in lower case)
 - key: the access code for the news service (ask Hermes; keep it private)
 - depth: 2 for gray shades (this reader supports them), 1 for plain black and white
+- lang: nl for Dutch (the default), en for English
 - dest: the image file
 
 About "Receives: sleep and current book": the reader tells every plugin that listens for sleep which book is open. This plugin does not use or send it.

@@ -12,6 +12,7 @@ Changing the location or other settings: edit config.json in this plugin's folde
 - lat, lon: the location, in decimal degrees (Netherlands only)
 - place: the name shown at the top; write spaces as %20
 - depth: 2 for gray shades (this reader supports them), 1 for plain black and white
+- lang: nl for Dutch (the default), en for English
 - dest: the image file. Set it to /sleep.bmp and choose Settings, Sleep Screen, Custom to show the forecast as the sleep picture instead.
 
 About "Receives: sleep and current book": the reader tells every plugin that listens for sleep which book is open. This plugin does not use or send it; it only downloads the forecast image.

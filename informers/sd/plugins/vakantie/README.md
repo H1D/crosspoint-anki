@@ -9,6 +9,7 @@ What it shows, in simple Dutch: how many days until the next school holiday and 
 Changing settings: edit config.json in this plugin's folder on a computer (take out the SD card, or use File Transfer). The reader cannot edit it itself.
 - regio: your school holiday region, noord, midden, or zuid (Amsterdam is midden)
 - depth: 2 for gray shades (this reader supports them), 1 for plain black and white
+- lang: nl for Dutch (the default), en for English
 - dest: the image file. Set it to /sleep.bmp and choose Settings, Sleep Screen, Custom to show it as the sleep picture instead.
 
 About "Receives: sleep and current book": the reader tells every plugin that listens for sleep which book is open. This plugin does not use or send it.

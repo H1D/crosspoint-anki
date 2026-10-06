@@ -4,5 +4,6 @@
   "lon": "4.90",
   "place": "Amsterdam",
   "depth": "2",
+  "lang": "nl",
   "dest": "/informers/1-weather.bmp"
 }

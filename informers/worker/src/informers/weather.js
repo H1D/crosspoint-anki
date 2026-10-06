@@ -1,11 +1,12 @@
-// Weather for a child: simple Dutch, big icons, rain in the next two hours.
+// Weather for a child: simple Dutch (or English with lang=en), big icons,
+// rain in the next two hours.
 // Data: Buienradar (station measurements, 5-day forecast, sun times) and
 // Buienalarm (5-minute rain nowcast).
 import { DARK_GRAY, GRAY } from "../canvas.js";
 import * as F from "../fonts.js";
 import { drawIcon, drop, iconFor } from "../icons.js";
 import { fetchJson } from "../fetch.js";
-import { clock, dateLong, weekdayShort } from "../time.js";
+import { clock, dateLong, langOf, weekdayShort } from "../time.js";
 
 const BUIENRADAR = "https://data.buienradar.nl/2.0/feed/json";
 const BUIENALARM = "https://imn-rust-lb.infoplaza.io/v4/nowcast/ba/timeseries";
@@ -22,71 +23,133 @@ function nearestStation(stations, lat, lon) {
   return best;
 }
 
-function feelSentence(t) {
-  if (t < 0) return "Het vriest!";
-  if (t < 8) return "Het is koud.";
-  if (t < 14) return "Het is fris.";
-  if (t < 20) return "Het is lekker weer.";
-  if (t < 26) return "Het is warm.";
-  return "Het is heet!";
+const T = {
+  nl: {
+    feel: ["Het vriest!", "Het is koud.", "Het is fris.", "Het is lekker weer.", "Het is warm.", "Het is heet!"],
+    sky: {
+      sun: ["De zon schijnt.", "De lucht is helder."],
+      partly: ["Zon en wolken.", "Er zijn een paar wolken."],
+      cloud: ["Er zijn veel wolken."],
+      rain: ["Het regent."],
+      showers: ["Soms valt er een bui."],
+      thunder: ["Er is onweer!"],
+      snow: ["Het sneeuwt!"],
+      fog: ["Het is mistig."],
+    },
+    how: ["een beetje", "", "hard"],
+    dry2h: "De komende 2 uur blijft het droog.",
+    rainingStays: (how) => `Het regent ${how} en dat blijft zo.`,
+    rainingUntil: (how, at) => `Het regent nu ${how}. Om ${at} is het weer droog.`,
+    rainIn: (how, minutes) => `${minutes <= 5 ? "Zo meteen" : `Over ${minutes} minuten`} gaat het ${how} regenen.`,
+    tips: {
+      raincoat: "Neem je regenjas mee!",
+      clothes: [
+        "Muts, sjaal en wanten aan!",
+        "Trek je winterjas aan.",
+        "Trek een jas aan.",
+        "Een trui of vest is genoeg.",
+        "Een T-shirt is genoeg.",
+        "Korte broek aan en drink veel water!",
+      ],
+      wind: "Het waait hard!",
+    },
+    chance: ["droog", "misschien", "regen"],
+    title: (place) => (place ? `Het weer in ${place}` : "Het weer"),
+    at: "om",
+    rain: "Regen",
+    now: "nu",
+    noMap: "Er is nu geen regenkaart.",
+  },
+  en: {
+    feel: ["It's freezing!", "It's cold.", "It's chilly.", "Nice weather.", "It's warm.", "It's hot!"],
+    sky: {
+      sun: ["The sun is shining.", "The sky is clear."],
+      partly: ["Sun and clouds.", "A few clouds."],
+      cloud: ["Lots of clouds."],
+      rain: ["It's raining."],
+      showers: ["Now and then a shower."],
+      thunder: ["Thunderstorm!"],
+      snow: ["It's snowing!"],
+      fog: ["It's foggy."],
+    },
+    how: ["a little", "", "hard"],
+    dry2h: "No rain for the next 2 hours.",
+    rainingStays: (how) => `It's raining ${how} and it will keep raining.`,
+    rainingUntil: (how, at) => `It's raining ${how} now. Dry again at ${at}.`,
+    rainIn: (how, minutes) => `${minutes <= 5 ? "Any minute now" : `In ${minutes} minutes`} it will rain ${how}.`,
+    tips: {
+      raincoat: "Take your raincoat!",
+      clothes: [
+        "Hat, scarf and gloves on!",
+        "Wear your winter coat.",
+        "Wear a jacket.",
+        "A sweater is enough.",
+        "A T-shirt is enough.",
+        "Shorts on, and drink lots of water!",
+      ],
+      wind: "It's very windy!",
+    },
+    chance: ["dry", "maybe", "rain"],
+    title: (place) => (place ? `Weather in ${place}` : "Weather"),
+    at: "at",
+    rain: "Rain",
+    now: "now",
+    noMap: "No rain map right now.",
+  },
+};
+
+const tidy = (s) => s.replace(/\s+/g, " ").replace(" .", ".");
+
+function feelSentence(t, L) {
+  const steps = [0, 8, 14, 20, 26];
+  const i = steps.findIndex((limit) => t < limit);
+  return L.feel[i === -1 ? steps.length : i];
 }
 
-function skySentence(kind, isNight) {
-  return {
-    sun: isNight ? "De lucht is helder." : "De zon schijnt.",
-    partly: isNight ? "Er zijn een paar wolken." : "Zon en wolken.",
-    cloud: "Er zijn veel wolken.",
-    rain: "Het regent.",
-    showers: "Soms valt er een bui.",
-    thunder: "Er is onweer!",
-    snow: "Het sneeuwt!",
-    fog: "Het is mistig.",
-  }[kind];
+function skySentence(kind, isNight, L) {
+  const options = L.sky[kind];
+  return isNight && options[1] ? options[1] : options[0];
 }
 
-function rainWord(mm) {
-  if (mm < 0.5) return "een beetje";
-  if (mm < 3) return "";
-  return "hard";
+function rainWord(mm, L) {
+  if (mm < 0.5) return L.how[0];
+  if (mm < 3) return L.how[1];
+  return L.how[2];
 }
 
 // One sentence about rain in the next two hours, from the 5-minute nowcast.
-function rainSentence(slots) {
+function rainSentence(slots, L) {
   const wet = slots.map((s) => s.mm >= RAIN_MM);
   const first = wet.indexOf(true);
-  if (first === -1) return "De komende 2 uur blijft het droog.";
+  if (first === -1) return L.dry2h;
   const peak = Math.max(...slots.map((s) => s.mm));
-  const how = rainWord(peak);
+  const how = rainWord(peak, L);
   if (first === 0) {
     const dry = wet.indexOf(false);
-    if (dry === -1) return `Het regent ${how} en dat blijft zo.`.replace("  ", " ");
-    return `Het regent nu ${how}. Om ${clock(slots[dry].time)} is het weer droog.`.replace("  ", " ");
+    if (dry === -1) return tidy(L.rainingStays(how));
+    return tidy(L.rainingUntil(how, clock(slots[dry].time)));
   }
   const minutes = Math.round((slots[first].time - Date.now()) / 60000 / 5) * 5;
-  const when = minutes <= 5 ? "Zo meteen" : `Over ${minutes} minuten`;
-  return `${when} gaat het ${how} regenen.`.replace("  ", " ");
+  return tidy(L.rainIn(how, minutes));
 }
 
-function tips(temp, bft, rainSoon) {
+function tips(temp, bft, rainSoon, L) {
   const out = [];
-  if (rainSoon) out.push("Neem je regenjas mee!");
-  if (temp < 3) out.push("Muts, sjaal en wanten aan!");
-  else if (temp < 10) out.push("Trek je winterjas aan.");
-  else if (temp < 15) out.push("Trek een jas aan.");
-  else if (temp < 20) out.push("Een trui of vest is genoeg.");
-  else if (temp < 25) out.push("Een T-shirt is genoeg.");
-  else out.push("Korte broek aan en drink veel water!");
-  if (bft >= 6) out.push("Het waait hard!");
+  if (rainSoon) out.push(L.tips.raincoat);
+  const steps = [3, 10, 15, 20, 25];
+  const i = steps.findIndex((limit) => temp < limit);
+  out.push(L.tips.clothes[i === -1 ? steps.length : i]);
+  if (bft >= 6) out.push(L.tips.wind);
   return out;
 }
 
-function rainChanceWord(pct) {
-  if (pct < 30) return "droog";
-  if (pct < 60) return "misschien";
-  return "regen";
+function rainChanceIndex(pct) {
+  if (pct < 30) return 0;
+  if (pct < 60) return 1;
+  return 2;
 }
 
-function rainChart(c, slots, x, y, w, h) {
+function rainChart(c, slots, x, y, w, h, L) {
   const max = Math.max(4, ...slots.map((s) => s.mm));
   const step = w / slots.length;
   c.rect(x, y + h, w, 2);
@@ -97,7 +160,7 @@ function rainChart(c, slots, x, y, w, h) {
   });
   slots.forEach((s, i) => {
     if (i % 6) return;
-    const label = i === 0 ? "nu" : clock(s.time);
+    const label = i === 0 ? L.now : clock(s.time);
     c.rect(x + i * step, y + h, 2, 8);
     c.text(label, x + i * step, y + h + 30, F.small, { align: i === 0 ? "left" : "center" });
   });
@@ -125,8 +188,10 @@ function demoRain() {
 
 export default {
   title: "Weer",
-  // Query: lat, lon, place (label at the top), demo=rain (fake shower).
+  // Query: lat, lon, place (label at the top), demo=rain (fake shower), lang=en.
   async render(c, params) {
+    const lang = langOf(params);
+    const L = T[lang];
     const lat = Number(params.get("lat") ?? 52.37);
     const lon = Number(params.get("lon") ?? 4.9);
     const place = params.get("place") || "";
@@ -154,23 +219,23 @@ export default {
 
     const W = c.width;
 
-    c.text(place ? `Het weer in ${place}` : "Het weer", 24, 50, F.title);
-    c.text(dateLong(Date.now()), 24, 86, F.body);
-    c.text(`om ${nowClock}`, W - 24, 86, F.small, { align: "right" });
+    c.text(L.title(place), 24, 50, F.title);
+    c.text(dateLong(Date.now(), lang), 24, 86, F.body);
+    c.text(`${L.at} ${nowClock}`, W - 24, 86, F.small, { align: "right" });
 
     drawIcon(c, kind === "sun" && isNight ? "partly" : kind, 118, 196, 180);
     c.text(`${temp}°`, W - 20, 266, F.huge, { align: "right" });
-    c.text(feelSentence(temp), 24, 344, F.big);
-    c.text(skySentence(kind, isNight), 24, 384, F.body);
+    c.text(feelSentence(temp, L), 24, 344, F.big);
+    c.text(skySentence(kind, isNight, L), 24, 384, F.body);
 
     c.rect(24, 404, W - 48, 2);
-    c.text("Regen", 24, 440, F.bodyBold);
-    c.paragraph(slots.length ? rainSentence(slots) : "Er is nu geen regenkaart.", 24, 474, W - 48, F.body, { lineHeight: 32 });
+    c.text(L.rain, 24, 440, F.bodyBold);
+    c.paragraph(slots.length ? rainSentence(slots, L) : L.noMap, 24, 474, W - 48, F.body, { lineHeight: 32 });
     // A chart with no bars reads as broken; on dry days the sentence says it all.
-    if (slots.some((s) => s.mm >= RAIN_MM)) rainChart(c, slots, 24, 518, W - 48, 44);
+    if (slots.some((s) => s.mm >= RAIN_MM)) rainChart(c, slots, 24, 518, W - 48, 44, L);
 
     const tipLines = [];
-    for (const tip of tips(temp, station.windspeedBft ?? 0, rainSoon)) {
+    for (const tip of tips(temp, station.windspeedBft ?? 0, rainSoon, L)) {
       const lines = wrap(c, tip, W - 72, F.bodyBold);
       if (tipLines.length + lines.length > 2) break;
       tipLines.push(...lines);
@@ -183,12 +248,13 @@ export default {
     const colW = (W - 40) / days.length;
     days.forEach((d, i) => {
       const cx = 20 + colW * i + colW / 2;
-      c.text(weekdayShort(d.day), cx, 718, F.bodyBold, { align: "center" });
+      c.text(weekdayShort(d.day, lang), cx, 718, F.bodyBold, { align: "center" });
       drawIcon(c, iconFor(d.weatherdescription), cx - 26, 748, 46);
       c.text(`${d.maxtemperatureMax}°`, cx + 2, 758, F.bodyBold);
-      const word = rainChanceWord(d.rainChance);
-      if (word !== "droog") drop(c, cx - c.textWidth(word, F.small) / 2 - 10, 786, 5);
-      c.text(word, cx + (word === "droog" ? 0 : 6), 792, F.small, { align: "center" });
+      const chance = rainChanceIndex(d.rainChance);
+      const word = L.chance[chance];
+      if (chance > 0) drop(c, cx - c.textWidth(word, F.small) / 2 - 10, 786, 5);
+      c.text(word, cx + (chance > 0 ? 6 : 0), 792, F.small, { align: "center" });
     });
     return c;
   },

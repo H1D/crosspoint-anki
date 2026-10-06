@@ -123,6 +123,26 @@ replayed points by the consumer's natural document/time key.
 }
 ```
 
+A `sleep.enter` handler may also list daily refresh times, local time per the
+reader's timezone setting, up to four per plugin:
+
+```json
+"sleep.enter": {
+  "download": { "url": "{cfg.server}/news.bmp", "dest": "/sleep.bmp" },
+  "wake": ["07:55", "19:05"]
+}
+```
+
+Before deep sleep the reader arms its sleep timer for the earliest such time
+across all plugins (needs a trusted clock, so WiFi once since the last
+power-off, and at least 20% battery). The timer wake does not light up the UI:
+it joins the saved network, syncs the clock (and sleeps the rest if the timer,
+which runs off an RC oscillator, fired more than two minutes early), emits
+`sleep.enter` to every subscriber, drains, redraws the sleep screen without
+the popup when it is Custom (or Cover + Custom with no book open), and sleeps
+until the next time. A button wake afterwards resumes as if the reader had
+slept straight through.
+
 One handler per event. A handler is either:
 
 - **`request`** — `url`, `method` (default `POST`), `headers`, `body`. The

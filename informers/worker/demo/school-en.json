@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "updated": "2026-10-06T19:00:00+02:00",
+  "kids": {
+    "emma": {
+      "name": "Emma",
+      "items": [
+        {"id": "1", "posted": "2026-10-06T18:30:00+02:00", "from": "Group 5", "kind": "alarm", "title": "No school Wednesday",
+         "text": "Your teacher is ill and there is no one to take over. Stay home on Wednesday 7 October.", "day": "2026-10-07",
+         "alarm": {"day": "2026-10-07", "what": "No school"}},
+        {"id": "2", "posted": "2026-10-05T15:00:00+02:00", "from": "School", "kind": "event", "title": "Book market",
+         "text": "On Thursday 8 October there is a book market. Bring 2.50 euros, that buys you 3 books.", "day": "2026-10-08", "alarm": null},
+        {"id": "3", "posted": "2026-09-29T15:00:00+02:00", "from": "Group 5", "kind": "todo", "title": "Trip to the zoo",
+         "text": "On Friday 9 October your class goes to the zoo. Bring a packed lunch and a raincoat.", "day": "2026-10-09", "alarm": null},
+        {"id": "4", "posted": "2026-10-05T16:00:00+02:00", "from": "Group 5", "kind": "info", "title": "No sweets at school",
+         "text": "Bring fruit or a sandwich for the break, no crisps or sweets.", "day": null, "alarm": null}
+      ]
+    },
+    "noah": {
+      "name": "Noah",
+      "items": [
+        {"id": "2", "posted": "2026-10-05T15:00:00+02:00", "from": "School", "kind": "event", "title": "Book market",
+         "text": "On Thursday 8 October there is a book market. Bring 2.50 euros, that buys you 3 books.", "day": "2026-10-08", "alarm": null},
+        {"id": "5", "posted": "2026-10-02T12:00:00+02:00", "from": "Group 7", "kind": "todo", "title": "Gym on Monday",
+         "text": "Bring your gym clothes and shoes with white soles on Monday.", "day": "2026-10-12", "alarm": null},
+        {"id": "6", "posted": "2026-10-01T14:00:00+02:00", "from": "School", "kind": "info", "title": "Week against bullying",
+         "text": "This week your class talks about being kind to each other and how to say sorry.", "day": null, "alarm": null}
+      ]
+    }
+  }
+}

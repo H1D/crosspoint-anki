@@ -44,8 +44,10 @@ so a run with no new messages takes a few seconds; a run with new ones about two
   run warns again on the day.
 - Manual refresh: ask Hermes ("обнови школьные новости на ридерах"), or on
   clawd run `uv run ~/.hermes/scripts/school_informer.py run -v`.
-- Readers download only when they go to sleep. The `school-sleep` plugin puts
-  the picture on the sleep screen so an alarm is the first thing a child sees.
+- Readers download when they go to sleep, and wake themselves at 07:55 and
+  19:05 (the plugins' `wake` times) to download and redraw the sleep screen.
+  The `school-sleep` plugin puts the picture on the sleep screen, so an alarm
+  is the first thing a child sees even if nobody touched the reader.
 
 ## Setup on clawd
 
