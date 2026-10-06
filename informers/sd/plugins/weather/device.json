@@ -1,6 +1,6 @@
 {
   "title": "Weather (Weer)",
-  "description": "Dutch forecast for kids, refreshed each time the reader sleeps",
+  "description": "Kids forecast, new on each sleep",
   "config": {
     "file": "config.json"
   },

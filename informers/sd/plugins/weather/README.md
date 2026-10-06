@@ -1,18 +1,17 @@
-Weather informer (Weer)
+Weather for kids (Weer)
 
-A forecast in simple Dutch for children: temperature, rain in the next two hours (Buienalarm), a clothing tip, and the next four days (Buienradar).
+How to see it:
+1. Press the power button to put the reader to sleep, then wake it. While going to sleep the reader fetches a new forecast (it needs WiFi it has connected to before, and at least 20% battery).
+2. Go to Browse Files, open the "informers" folder, and open 1-weather.bmp. Press Left or Right to flip to other informers. Press Back to leave.
 
-Each time the reader goes to sleep it joins WiFi, downloads the image, and saves it to /informers/1-weather.bmp.
+What it shows, in simple Dutch: the temperature now, whether it will rain in the next two hours, what to wear, and the next four days. The time at the top ("om 18:43") says when the forecast was made.
 
-To view it: open the file browser, go to /informers, and open the image. Left and Right flip between informers.
+If the time does not change after a sleep, the reader could not get online that time; it keeps the last forecast and tries again next sleep.
 
-To show it on the sleep screen instead, set "dest" in config.json to /sleep.bmp and set Sleep Screen to Custom.
+Changing the location or other settings: edit config.json in this plugin's folder on a computer (take out the SD card, or use File Transfer). The reader cannot edit it itself.
+- lat, lon: the location, in decimal degrees (Netherlands only)
+- place: the name shown at the top; write spaces as %20
+- depth: 2 for gray shades (this reader supports them), 1 for plain black and white
+- dest: the image file. Set it to /sleep.bmp and choose Settings, Sleep Screen, Custom to show the forecast as the sleep picture instead.
 
-Settings, in config.json next to this file:
-- server: the informer Worker address
-- lat, lon: your location (Netherlands only; the data covers NL)
-- place: name at the top of the image (use %20 for spaces)
-- depth: 2 for 4-level gray (smooth text, gray shading; X4 and other gray panels), 1 for black and white
-- dest: where the image is saved
-
-The image refreshes only when the reader sleeps; it shows the time it was made. Needs a battery of at least 20% and a saved WiFi network.
+About "Receives: sleep and current book": the reader tells every plugin that listens for sleep which book is open. This plugin does not use or send it; it only downloads the forecast image.

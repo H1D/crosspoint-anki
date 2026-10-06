@@ -4,17 +4,12 @@
 import { DARK_GRAY, GRAY } from "../canvas.js";
 import * as F from "../fonts.js";
 import { drawIcon, drop, iconFor } from "../icons.js";
+import { fetchJson } from "../fetch.js";
 import { clock, dateLong, weekdayShort } from "../time.js";
 
 const BUIENRADAR = "https://data.buienradar.nl/2.0/feed/json";
 const BUIENALARM = "https://imn-rust-lb.infoplaza.io/v4/nowcast/ba/timeseries";
 const RAIN_MM = 0.1; // below this the nowcast counts as dry
-
-async function getJson(url, headers = {}) {
-  const res = await fetch(url, { headers: { Accept: "application/json", ...headers } });
-  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
-  return res.json();
-}
 
 function nearestStation(stations, lat, lon) {
   let best = null;
@@ -72,16 +67,23 @@ function rainSentence(slots) {
   return `${when} gaat het ${how} regenen.`.replace("  ", " ");
 }
 
-function tips(temp, bft, rainSoon, kind) {
+function tips(temp, bft, rainSoon) {
   const out = [];
   if (rainSoon) out.push("Neem je regenjas mee!");
-  if (temp < 3) out.push("Doe een muts en wanten aan.");
-  else if (temp < 12) out.push("Trek een warme jas aan.");
-  else if (temp < 18 && !rainSoon) out.push("Een trui of jasje is genoeg.");
-  if (bft >= 6) out.push("Het waait hard. Hou je pet vast!");
-  if (temp >= 25 && kind === "sun") out.push("Smeer je in en drink veel water.");
-  if (!out.length) out.push("Lekker weer om buiten te spelen!");
-  return out.slice(0, 2);
+  if (temp < 3) out.push("Muts, sjaal en wanten aan!");
+  else if (temp < 10) out.push("Trek je winterjas aan.");
+  else if (temp < 15) out.push("Trek een jas aan.");
+  else if (temp < 20) out.push("Een trui of vest is genoeg.");
+  else if (temp < 25) out.push("Een T-shirt is genoeg.");
+  else out.push("Korte broek aan en drink veel water!");
+  if (bft >= 6) out.push("Het waait hard!");
+  return out;
+}
+
+function rainChanceWord(pct) {
+  if (pct < 30) return "droog";
+  if (pct < 60) return "misschien";
+  return "regen";
 }
 
 function rainChart(c, slots, x, y, w, h) {
@@ -130,10 +132,9 @@ export default {
     const place = params.get("place") || "";
 
     const [br, ba] = await Promise.all([
-      getJson(BUIENRADAR),
-      getJson(`${BUIENALARM}/${lat.toFixed(2)}/${lon.toFixed(2)}`, {
-        Referer: "https://www.buienalarm.nl/",
-        Origin: "https://www.buienalarm.nl",
+      fetchJson(BUIENRADAR),
+      fetchJson(`${BUIENALARM}/${lat.toFixed(2)}/${lon.toFixed(2)}`, {
+        headers: { Referer: "https://www.buienalarm.nl/", Origin: "https://www.buienalarm.nl" },
       }).catch(() => null),
     ]);
 
@@ -165,10 +166,11 @@ export default {
     c.rect(24, 404, W - 48, 2);
     c.text("Regen", 24, 440, F.bodyBold);
     c.paragraph(slots.length ? rainSentence(slots) : "Er is nu geen regenkaart.", 24, 474, W - 48, F.body, { lineHeight: 32 });
-    if (slots.length) rainChart(c, slots, 24, 518, W - 48, 44);
+    // A chart with no bars reads as broken; on dry days the sentence says it all.
+    if (slots.some((s) => s.mm >= RAIN_MM)) rainChart(c, slots, 24, 518, W - 48, 44);
 
     const tipLines = [];
-    for (const tip of tips(temp, station.windspeedBft ?? 0, rainSoon, kind)) {
+    for (const tip of tips(temp, station.windspeedBft ?? 0, rainSoon)) {
       const lines = wrap(c, tip, W - 72, F.bodyBold);
       if (tipLines.length + lines.length > 2) break;
       tipLines.push(...lines);
@@ -184,8 +186,9 @@ export default {
       c.text(weekdayShort(d.day), cx, 718, F.bodyBold, { align: "center" });
       drawIcon(c, iconFor(d.weatherdescription), cx - 26, 748, 46);
       c.text(`${d.maxtemperatureMax}°`, cx + 2, 758, F.bodyBold);
-      drop(c, cx - 26, 786, 5);
-      c.text(`${d.rainChance}%`, cx - 16, 792, F.small);
+      const word = rainChanceWord(d.rainChance);
+      if (word !== "droog") drop(c, cx - c.textWidth(word, F.small) / 2 - 10, 786, 5);
+      c.text(word, cx + (word === "droog" ? 0 : 6), 792, F.small, { align: "center" });
     });
     return c;
   },

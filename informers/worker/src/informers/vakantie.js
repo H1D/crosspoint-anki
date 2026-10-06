@@ -2,6 +2,7 @@
 // Data: Rijksoverheid open data (schoolholidays), keyless, all school years at
 // once. Regions noord/midden/zuid; Kerst- and Meivakantie are national and
 // listed as "heel Nederland".
+import { fetchJson } from "../fetch.js";
 import { GRAY } from "../canvas.js";
 import * as F from "../fonts.js";
 import { drawIcon } from "../icons.js";
@@ -79,9 +80,7 @@ export default {
     const region = REGIONS.includes(asked) ? asked : "midden";
     const fake = params.get("vandaag");
 
-    const res = await fetch(SOURCE, { headers: { Accept: "application/json" } });
-    if (!res.ok) throw new Error(`${SOURCE} -> ${res.status}`);
-    const all = holidays(await res.json(), region);
+    const all = holidays(await fetchJson(SOURCE, { ttl: 86400 }), region);
 
     const today = dayNr(fake || amsDate.format(Date.now()));
     const upcoming = all.filter((h) => h.end >= today);

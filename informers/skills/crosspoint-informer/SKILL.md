@@ -38,6 +38,8 @@ informers/
   worker/src/icons.js              weather icons, raindrop
   worker/src/time.js               Dutch clock/date in Europe/Amsterdam
   worker/src/render.js             builds the canvas for the requested depth, encodes the BMP
+  worker/src/fetch.js              fetchJson(url, { headers, ttl }): upstream JSON via the edge cache
+  worker/wrangler.jsonc            Worker config (name, compatibility date)
   worker/scripts/render.mjs        render one informer locally to a BMP
   worker/scripts/preview.py        BMPs (1- or 2-bit) to a side-by-side PNG
   worker/scripts/deploy.sh         deploy with the scoped token
@@ -48,14 +50,18 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
 
 ## Add an informer
 
-1. **Pick the data.** Prefer keyless public JSON APIs. Fetch from the Worker
-   with `fetch()`. A secret (API key) goes in as a Worker secret:
+1. **Pick the data.** Prefer keyless public JSON APIs. Fetch them with
+   `fetchJson(url, { ttl })` from `../fetch.js`: it caches the upstream
+   response at the edge for `ttl` seconds (default 300; a day for data that
+   changes daily) and throws on non-2xx. Do not cache the finished image: it
+   is drawn per request so its printed time is always the time of the sleep. A secret (API key) goes in as a Worker secret:
    `npx wrangler secret put NAME` (same env vars as deploy) and is read from
    `env.NAME` in `render(c, params, env)`.
 2. **Write `worker/src/informers/<name>.js`:**
 
    ```js
    import { BLACK, DARK_GRAY, GRAY } from "../canvas.js";
+   import { fetchJson } from "../fetch.js";
    import * as F from "../fonts.js";
    import { clock, dateLong } from "../time.js";
 
@@ -63,9 +69,7 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
      title: "Rooster",
      // Query: document every parameter the plugin passes (depth is handled for you).
      async render(c, params, env) {
-       const res = await fetch("https://example.org/api", { headers: { Accept: "application/json" } });
-       if (!res.ok) throw new Error(`source ${res.status}`); // -> 502, reader keeps its old image
-       const data = await res.json();
+       const data = await fetchJson("https://example.org/api"); // throws -> 502, reader keeps its old image
 
        // c is a white 480x800 canvas; c.gray is true when the reader asked for 4-level gray.
        c.text("Rooster", 24, 50, F.title);
@@ -100,15 +104,16 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
    scripts/deploy.sh
    ```
 
+   `deploy.sh` defaults `CLOUDFLARE_ACCOUNT_ID`; only the token is needed.
    The token can edit only this Worker. Plain `wrangler deploy` fails on it
    (it reads the account's workers.dev subdomain); `deploy.sh` uploads a version
    and promotes it. It ends by printing `GET /`, which must list the new informer.
 5. **Check the live image:**
    `curl -s -o /tmp/live.bmp -w '%{http_code}\n' "https://crosspoint-informers.doorcomp.workers.dev/<name>.bmp?<query>"`
    must print `200`, and `file /tmp/live.bmp` must say `480 x 800 x 1`
-   (`x 2` with `depth=2`).
-   Responses are cached for 5 minutes per URL; add a throwaway query parameter
-   to bypass the cache while testing.
+   (`x 2` with `depth=2`). Images are not cached; a fresh deploy can take a
+   few seconds to reach every edge, so retry briefly if you still get the old
+   output.
 6. **Add the plugin folder** `informers/sd/plugins/<name>/` (folder name at most
    23 bytes):
 
@@ -139,12 +144,23 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
    }
    ```
 
-   `README.md`: plain text shown on the reader (Settings, System, Plugins):
-   what it shows, how to view it, what each config key means (including
-   `depth`: 2 for 4-level gray panels such as the X4, 1 for black and white). Number the
-   `dest` file so it sorts after existing informers (`1-weather`, `2-...`).
+   `README.md`: plain text shown on the reader (Settings, System, Plugins).
+   The reader is a parent, not a developer: plain English, no jargon. Copy the
+   structure of `sd/plugins/weather/README.md`: first "How to see it" (sleep
+   and wake, then Browse Files, informers, the file name, Left/Right, Back),
+   then what it shows, then settings. Say that `config.json` is edited on a
+   computer (the reader's file browser shows only books and images), what each
+   key means (`depth`: 2 for gray, 1 for black and white), and keep the note
+   explaining the "Receives: sleep and current book" line the reader shows.
+   Keep `description` in `device.json` under about 32 characters; the plugin
+   list cuts longer ones off.
+
+   Pick `dest` as the next free number: list the taken ones with
+   `grep -h '"dest"' informers/sd/plugins/*/config.json` and use
+   `/informers/<next>-<name>.bmp`. Never reuse a number.
 7. **Update the table** in `informers/README.md`, commit on a branch with
-   explicit paths, and do not push without the user's approval.
+   explicit paths, and do not push without the user's approval. No
+   `Co-Authored-By` or other AI-attribution trailers in commit messages.
 8. **Install on the reader** (tell the user, or do it when the reader is
    reachable). Two ways:
    - SD card: copy the folder to `/plugins/<name>/`; make sure `/informers/` exists.

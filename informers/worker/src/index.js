@@ -6,10 +6,9 @@ import weather from "./informers/weather.js";
 import { renderBmp } from "./render.js";
 
 const INFORMERS = { weather, vakantie };
-const CACHE_SECONDS = 300;
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === "/") {
       const list = Object.keys(INFORMERS).map((n) => `/${n}.bmp`);
@@ -19,10 +18,6 @@ export default {
     const informer = match && INFORMERS[match[1]];
     if (!informer) return new Response("not found", { status: 404 });
 
-    const cache = caches.default;
-    const cached = await cache.match(request);
-    if (cached) return cached;
-
     let bmp;
     try {
       bmp = await renderBmp(informer, url.searchParams, env);
@@ -31,10 +26,7 @@ export default {
       // A non-2xx keeps the reader's previous image in place.
       return new Response("upstream data unavailable", { status: 502 });
     }
-    const res = new Response(bmp, {
-      headers: { "Content-Type": "image/bmp", "Cache-Control": `public, max-age=${CACHE_SECONDS}` },
-    });
-    ctx.waitUntil(cache.put(request, res.clone()));
-    return res;
+    // Drawn per request so the printed time is always now; data is cached in fetchJson.
+    return new Response(bmp, { headers: { "Content-Type": "image/bmp", "Cache-Control": "no-store" } });
   },
 };
