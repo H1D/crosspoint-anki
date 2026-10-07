@@ -8,10 +8,11 @@
 // black, so a one-off appointment stands out from the weekly routine.
 import { BLACK, DARK_GRAY, GRAY, WHITE } from "../canvas.js";
 import * as F from "../fonts.js";
-import { drawIcon, drop, iconFor } from "../icons.js";
+import { drawIcon, iconFor } from "../icons.js";
 import { clock, dateLong, langOf } from "../time.js";
 import { HttpError, KEY as SCHOOL_KEY, STALE_HOURS, amsDate, dayNr, fold, itemBlock, pick, relDay, T as SCHOOL_T, wrap } from "./school.js";
 import { T as WEATHER_T, feelSentence, loadWeather, rainChanceIndex, rainSentence, skySentence, tips } from "./weather.js";
+import { WET_MM, dryText, hourOf, hourRange, hoursOf, rainChart, rainWhen, startOfHour } from "../rain.js";
 
 const AGENDA_KEY = "agenda";
 const DAY = 86400000;
@@ -25,7 +26,7 @@ const T = {
     allDay: "hele dag",
     noEvents: "Niets in de agenda.",
     noAgenda: "Agenda is nog niet gekoppeld.",
-    unknown: "Agenda voor deze dag is nog niet bekend.",
+    unknown: "Agenda nog niet bekend.",
     noNews: "Geen schoolnieuws.",
     more: (n) => `+${n} meer`,
     fresh: (a, s) => [a && `agenda ${a}`, s && `school ${s}`].filter(Boolean).join(" · "),
@@ -39,7 +40,7 @@ const T = {
     allDay: "all day",
     noEvents: "Nothing in the calendar.",
     noAgenda: "Calendar not connected yet.",
-    unknown: "Calendar for this day not read yet.",
+    unknown: "Calendar not read yet.",
     noNews: "No school news.",
     more: (n) => `+${n} more`,
     fresh: (a, s) => [a && `calendar ${a}`, s && `school ${s}`].filter(Boolean).join(" · "),
@@ -85,29 +86,62 @@ export async function pushAgenda(request, env) {
   return Response.json({ ok: true, kids: Object.keys(data.kids), events: Object.values(data.kids).map((k) => k.events.length) });
 }
 
-// Today: the station now and rain in the next two hours. Later days: the forecast.
+// Today: the station now and rain from now on. Later days: the forecast. Rain
+// gets a sentence saying when, and a timeline when there is any.
 function weatherBlock(c, w, offset, targetIso, lang, y) {
   const L = WEATHER_T[lang];
   const W = c.width;
-  if (offset === 0) {
-    drawIcon(c, w.kind === "sun" && w.isNight ? "partly" : w.kind, 72, y + 62, 108);
-    c.text(`${w.temp}°`, 150, y + 74, F.big);
-    c.text(feelSentence(w.temp, L), 150, y + 110, F.bodyBold);
-    const rain = w.slots.length ? rainSentence(w.slots, L) : skySentence(w.kind, w.isNight, L);
-    const lines = wrap(c, rain, F.small, W - 174, 2);
-    lines.forEach((l, i) => c.text(l, 150, y + 140 + i * 26, F.small));
-    return tipBox(c, tips(w.temp, w.station.windspeedBft ?? 0, w.rainSoon, L), y + 148 + lines.length * 26);
+  const now = Date.now();
+  const startMs = startOfHour(now);
+  const range = hourRange(offset, hourOf(now));
+  // The radar nowcast is better than the model for the next two hours; without
+  // the hourly forecast, today's timeline still shows the nowcast alone.
+  const nowcast = offset === 0 && w.slots.length ? w.slots : null;
+  let hours = hoursOf(w.hourly, targetIso, range);
+  if (!hours && nowcast) hours = Array.from({ length: range.to - range.from }, (_, i) => ({ hour: range.from + i, mm: 0, p: 0 }));
+  if (hours && nowcast) {
+    for (const s of nowcast) {
+      const col = Math.floor((s.time - startMs) / 3600000);
+      if (col < 0 || col >= hours.length) continue;
+      if (!hours[col].fromNowcast) Object.assign(hours[col], { mm: 0, p: 100, fromNowcast: true });
+      hours[col].mm = Math.max(hours[col].mm, s.mm);
+    }
   }
-  const d = w.days.find((day) => day.day.slice(0, 10) === targetIso);
-  if (!d) return y;
-  const max = d.maxtemperatureMax;
-  drawIcon(c, iconFor(d.weatherdescription), 72, y + 62, 108);
-  c.text(`${max}° / ${d.mintemperatureMin}°`, 150, y + 74, F.big);
-  c.text(feelSentence(max, L), 150, y + 110, F.bodyBold);
-  const chance = rainChanceIndex(d.rainChance);
-  if (chance > 0) drop(c, 158, y + 134, 6);
-  c.text(`${L.rain}: ${L.chance[chance]} (${d.rainChance}%)`, chance > 0 ? 172 : 150, y + 140, F.small);
-  return tipBox(c, tips(max, d.wind ?? 0, chance === 2, L), y + 160);
+  const wet = hours?.some((h) => h.mm >= WET_MM);
+  const likelyWet = hours?.some((h) => h.mm >= WET_MM && h.p >= 50);
+
+  let temp;
+  let tipList;
+  if (offset === 0) {
+    temp = w.temp;
+    drawIcon(c, w.kind === "sun" && w.isNight ? "partly" : w.kind, 72, y + 62, 108);
+    c.text(`${temp}°`, 150, y + 74, F.big);
+    tipList = tips(temp, w.station.windspeedBft ?? 0, w.rainSoon || likelyWet, L);
+  } else {
+    const d = w.days.find((day) => day.day.slice(0, 10) === targetIso);
+    if (!d) return y;
+    temp = d.maxtemperatureMax;
+    drawIcon(c, iconFor(d.weatherdescription), 72, y + 62, 108);
+    c.text(`${temp}° / ${d.mintemperatureMin}°`, 150, y + 74, F.big);
+    tipList = tips(temp, d.wind ?? 0, hours ? likelyWet : rainChanceIndex(d.rainChance) === 2, L);
+  }
+  c.text(feelSentence(temp, L), 150, y + 110, F.bodyBold);
+
+  // When: the nowcast's minute-precise sentence if rain is under two hours
+  // away, else the windows over the day.
+  let when;
+  if (nowcast && w.rainSoon) when = rainSentence(nowcast, L);
+  else if (hours) when = rainWhen(hours, lang, { fromNow: offset === 0 }) ?? dryText(offset, lang);
+  else when = offset === 0 ? skySentence(w.kind, w.isNight, L) : null;
+  let by = y + 140;
+  if (when) {
+    const lines = wrap(c, when, F.small, W - 174, 2);
+    lines.forEach((l, i) => c.text(l, 150, by + i * 26, F.small));
+    by += (lines.length - 1) * 26;
+  }
+  by += 14;
+  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { nowcast, startMs: offset === 0 ? startMs : 0 }) + 4;
+  return tipBox(c, tipList, by);
 }
 
 // The most useful tip only (raincoat first): one line that always fits.

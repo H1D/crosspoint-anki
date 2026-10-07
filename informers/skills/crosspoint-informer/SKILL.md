@@ -216,7 +216,9 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
 - The download happens on sleep, with battery at least 20% and a saved WiFi
   network. To refresh while the reader sleeps, add `"wake": ["HH:MM", ...]`
   (local time, up to 4) next to `download` in the `sleep.enter` handler; the
-  reader wakes itself then. Pick times just after the data changes.
+  reader wakes itself then. Pick times just after the data changes. Add
+  `"refresh_minutes": 120` to skip ordinary sleeps while the image is younger
+  than that (no WiFi needed for them); `wake` times always refresh.
 - Informers take `lang=en` for English; keep a `T = { nl, en }` table of screen
   text (see `weather.js`) and pass `lang` through the plugin config.
 

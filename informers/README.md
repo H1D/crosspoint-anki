@@ -37,7 +37,7 @@ build.
 | `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `depth`, `demo=rain` |
 | `vakantie` | Rijksoverheid open data school holidays; days until the next holiday per region, simple Dutch for an 8-year-old | `regio=noord\|midden\|zuid`, `depth`, `vandaag=YYYY-MM-DD` |
 | `school` | Parro news per child, pushed twice a day by a job on Hermes's host (see `school/README.md`); stays in KV, needs `key` | `kid`, `key`, `depth`, `vandaag=YYYY-MM-DD` |
-| `dag` | One child's day: weather, the day's agenda, school news about that day. The agenda is pushed hourly by a job on Hermes's host (see `agenda/README.md`); one-off events are white on black, repeating ones a plain line | `kid`, `key`, `offset=0\|1\|2` (today, tomorrow, day after), `lat`, `lon`, `depth`, `vandaag=YYYY-MM-DD` |
+| `dag` | One child's day: weather with a rain timeline (when rain falls, hour by hour; the next two hours from the radar), the day's agenda, school news about that day. The agenda is pushed hourly by a job on Hermes's host (see `agenda/README.md`); one-off events are white on black, repeating ones a plain line | `kid`, `key`, `offset=0\|1\|2` (today, tomorrow, day after), `lat`, `lon`, `depth`, `vandaag=YYYY-MM-DD` |
 
 ## Develop and deploy
 
@@ -73,8 +73,9 @@ installed for Hermes).
    between informers; files are ordered by name, hence the number prefixes.
 
 To show an informer as the sleep screen, set its `dest` to `/sleep.bmp` and
-set Sleep Screen to Custom. Images refresh each time the reader goes to sleep,
-and at the `wake` times a plugin lists (the school plugins ask for 07:55 and
+set Sleep Screen to Custom. Images refresh when the reader goes to sleep and
+the plugin's last refresh is at least `refresh_minutes` old (120 in these
+plugins, so most sleeps need no WiFi), and at the `wake` times a plugin lists (the school plugins ask for 07:55 and
 19:05): the reader wakes itself, downloads, redraws the sleep screen, and
 sleeps again (see `docs/plugin-events.md`). Each image prints the time it was
 rendered. Every informer takes `lang=en` for English (`lang` in each

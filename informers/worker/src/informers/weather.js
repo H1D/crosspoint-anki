@@ -10,6 +10,8 @@ import { clock, dateLong, langOf, weekdayShort } from "../time.js";
 
 const BUIENRADAR = "https://data.buienradar.nl/2.0/feed/json";
 const BUIENALARM = "https://imn-rust-lb.infoplaza.io/v4/nowcast/ba/timeseries";
+// Hourly rain amount and ensemble probability for three days, local time.
+const OPEN_METEO = "https://api.open-meteo.com/v1/forecast";
 const RAIN_MM = 0.1; // below this the nowcast counts as dry
 
 function nearestStation(stations, lat, lon) {
@@ -191,11 +193,16 @@ function demoRain() {
 export async function loadWeather(params) {
   const lat = Number(params.get("lat") ?? 52.37);
   const lon = Number(params.get("lon") ?? 4.9);
-  const [br, ba] = await Promise.all([
+  const [br, ba, om] = await Promise.all([
     fetchJson(BUIENRADAR),
     fetchJson(`${BUIENALARM}/${lat.toFixed(2)}/${lon.toFixed(2)}`, {
       headers: { Referer: "https://www.buienalarm.nl/", Origin: "https://www.buienalarm.nl" },
     }).catch(() => null),
+    fetchJson(
+      `${OPEN_METEO}?latitude=${lat.toFixed(2)}&longitude=${lon.toFixed(2)}` +
+        "&hourly=precipitation,precipitation_probability&timezone=Europe%2FAmsterdam&forecast_days=4",
+      { ttl: 900 },
+    ).catch(() => null),
   ]);
   const station = nearestStation(br.actual.stationmeasurements, lat, lon);
   const sunrise = br.actual.sunrise.slice(11, 16);
@@ -215,6 +222,8 @@ export async function loadWeather(params) {
     rainSoon: slots.slice(0, 12).some((s) => s.mm >= RAIN_MM),
     // From tomorrow on; entries carry day "YYYY-MM-DDT00:00:00".
     days: br.forecast.fivedayforecast,
+    // { time: ["2026-10-08T07:00", ...], precipitation: [mm], precipitation_probability: [%] }, or null
+    hourly: om?.hourly ?? null,
   };
 }
 

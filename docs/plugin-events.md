@@ -143,6 +143,22 @@ the popup when it is Custom (or Cover + Custom with no book open), and sleeps
 until the next time. A button wake afterwards resumes as if the reader had
 slept straight through.
 
+A `sleep.enter` handler may also set `"refresh_minutes"` (up to 1440): an
+ordinary sleep then refreshes it only when its last delivered `sleep.enter` is
+at least that old. A skipped plugin queues nothing, so a sleep where every
+plugin is fresh does not bring WiFi up at all. The `wake` times always
+refresh, and so does a reader whose clock is not trusted yet. The time of the
+last refresh is kept in `.refreshed` in the plugin's folder; one pending
+`sleep.enter` (an earlier sleep without WiFi) is not queued twice.
+
+```json
+"sleep.enter": {
+  "download": { "url": "{cfg.server}/daily.bmp", "dest": "/sleep.bmp" },
+  "refresh_minutes": 120,
+  "wake": ["07:55", "19:05"]
+}
+```
+
 One handler per event. A handler is either:
 
 - **`request`** — `url`, `method` (default `POST`), `headers`, `body`. The

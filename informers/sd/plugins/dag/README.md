@@ -2,10 +2,10 @@ My day (Mijn dag)
 
 How to see it:
 1. Set Settings → Display → Sleep Screen to Custom. Today's picture is the sleep screen.
-2. Press the power button to put the reader to sleep. While going to sleep the reader fetches three pictures (it needs WiFi it has connected to before, and at least 20% battery). It also wakes itself at 06:45, 07:55 and 19:05 to refresh them.
+2. Press the power button to put the reader to sleep. While going to sleep the reader fetches three pictures when the last ones are more than 2 hours old (it needs WiFi it has connected to before, and at least 20% battery). It also wakes itself at 06:45, 07:55 and 19:05 to refresh them.
 3. Tomorrow and the day after are in Browse Files → "informers": 0-morgen.bmp and 0-overmorgen.bmp. Press Left or Right to flip between informers. Press Back to leave.
 
-What it shows, for one child and one day: the weather (today: now and rain in the next 2 hours; tomorrow and the day after: the forecast), the day's agenda from the family calendars, and school news about that day. Something that happens only once (a dentist visit, a birthday) is white on black with a "!", so it stands out from the weekly routine. No school on that day puts a black bar at the top.
+What it shows, for one child and one day: the weather (today: now; tomorrow and the day after: the forecast) with, when it rains, a sentence and a small chart saying when (dark bars: rain is likely, light bars: maybe; today the first two hours come from the rain radar), the day's agenda from the family calendars, and school news about that day. Something that happens only once (a dentist visit, a birthday) is white on black with a "!", so it stands out from the weekly routine. No school on that day puts a black bar at the top.
 
 The agenda is read from the calendars every hour, the school news at 07:50 and 19:00. The bottom line says when each was last read.
 
