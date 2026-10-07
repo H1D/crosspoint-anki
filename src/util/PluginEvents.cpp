@@ -3,6 +3,7 @@
 #include <ArduinoJson.h>
 #include <HalStorage.h>
 #include <Logging.h>
+#include <TrustedTime.h>
 #include <esp_random.h>
 #include <time.h>
 
@@ -48,6 +49,7 @@ struct Subscriber {
   uint8_t connectMask = 0;  // events whose handler declares "connect": true
   uint8_t wakeCount = 0;
   int16_t wakeMinutes[MAX_WAKE_TIMES] = {0};  // sleep.enter "wake" times, minutes after local midnight
+  uint16_t refreshMinutes = 0;                // sleep.enter "refresh_minutes"; 0 = every sleep
 };
 Subscriber subscribers[MAX_EVENT_PLUGINS];
 
@@ -61,6 +63,42 @@ int eventFromName(const char* name) {
 }
 
 std::string outboxPath(const Subscriber& sub) { return std::string(sub.dir) + OUTBOX_NAME; }
+
+// Unix time of the plugin's last delivered sleep.enter, for "refresh_minutes".
+constexpr const char* REFRESHED_NAME = "/.refreshed";
+constexpr uint16_t MAX_REFRESH_MINUTES = 24 * 60;
+
+std::string refreshedPath(const Subscriber& sub) { return std::string(sub.dir) + REFRESHED_NAME; }
+
+// True when the last refresh is younger than the plugin's interval. Without a
+// trusted clock or a record the answer is false: refreshing is the safe side.
+bool refreshedRecently(const Subscriber& sub) {
+  if (sub.refreshMinutes == 0) return false;
+  const int64_t now = trustedtime::trustedNow();
+  if (now == 0) return false;
+  const std::string path = refreshedPath(sub);
+  char buf[24] = {0};
+  if (!Storage.exists(path.c_str()) || Storage.readFileToBuffer(path.c_str(), buf, sizeof(buf)) == 0) return false;
+  const long long at = strtoll(buf, nullptr, 10);
+  return at > 0 && at <= now && now - at < static_cast<int64_t>(sub.refreshMinutes) * 60;
+}
+
+bool pendingSleepEnter(const std::string& outbox) {
+  std::string raw;
+  if (!Storage.exists(outbox.c_str())) return false;
+  if (!Storage.readFileToString("PEVT", outbox, MAX_OUTBOX_BYTES + MAX_EVENT_LINE, raw)) return false;
+  return raw.find("\"e\":\"sleep.enter\"") != std::string::npos;
+}
+
+void noteRefreshed(const Subscriber& sub) {
+  const int64_t now = trustedtime::trustedNow();
+  if (sub.refreshMinutes == 0 || now == 0) return;
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%lld", static_cast<long long>(now));
+  if (!Storage.writeFile(refreshedPath(sub).c_str(), String(buf))) {
+    LOG_ERR("PEVT", "%s: refresh time not saved", sub.name);
+  }
+}
 
 }  // namespace
 
@@ -94,6 +132,7 @@ void refreshSubscriptions() {
     uint8_t connectMask = 0;
     uint8_t wakeCount = 0;
     int16_t wakeMinutes[MAX_WAKE_TIMES] = {0};
+    uint16_t refreshMinutes = 0;
     for (JsonPairConst kv : doc["events"].as<JsonObjectConst>()) {
       const int e = eventFromName(kv.key().c_str());
       if (e < 0) {
@@ -103,6 +142,8 @@ void refreshSubscriptions() {
       mask |= static_cast<uint8_t>(1u << e);
       if (kv.value()["connect"] | false) connectMask |= static_cast<uint8_t>(1u << e);
       if (e != static_cast<int>(Event::SleepEnter)) continue;
+      const unsigned minutes = kv.value()["refresh_minutes"] | 0u;
+      refreshMinutes = static_cast<uint16_t>(minutes < MAX_REFRESH_MINUTES ? minutes : MAX_REFRESH_MINUTES);
       for (JsonVariantConst at : kv.value()["wake"].as<JsonArrayConst>()) {
         const int minute = wakeschedule::parseClock(at.as<const char*>());
         if (minute < 0 || wakeCount >= MAX_WAKE_TIMES) {
@@ -126,6 +167,7 @@ void refreshSubscriptions() {
     sub.connectMask = connectMask;
     sub.wakeCount = wakeCount;
     memcpy(sub.wakeMinutes, wakeMinutes, sizeof(wakeMinutes));
+    sub.refreshMinutes = refreshMinutes;
     LOG_DBG("PEVT", "%s subscribes mask=0x%02x", sub.name, sub.mask);
   }
 }
@@ -169,7 +211,7 @@ bool wantsConnectAny() {
   return false;
 }
 
-void emit(const Event e, const Var* vars, const size_t varCount) {
+void emit(const Event e, const Var* vars, const size_t varCount, const bool scheduled) {
   if (!anySubscriber(e)) return;
 
   // One line: {"e":"reader.exit","id":"3fa9c21b-7","ts":1734212345,"vars":{"book":"...","percent":"74"}}
@@ -201,7 +243,16 @@ void emit(const Event e, const Var* vars, const size_t varCount) {
 
   for (const auto& sub : subscribers) {
     if (sub.name[0] == '\0' || !(sub.mask & eventBit(e))) continue;
+    // A plain sleep skips a plugin refreshed within its interval: nothing is
+    // queued, so the sleep needs no WiFi for it. Scheduled wakes always refresh.
+    if (e == Event::SleepEnter && !scheduled && refreshedRecently(sub)) {
+      LOG_DBG("PEVT", "%s: refreshed recently, skipped", sub.name);
+      continue;
+    }
     const std::string path = outboxPath(sub);
+    // A refresh plugin's images do not depend on the event: one pending
+    // sleep.enter (an earlier sleep without WiFi) already covers this one.
+    if (e == Event::SleepEnter && sub.refreshMinutes > 0 && pendingSleepEnter(path)) continue;
     HalFile file = Storage.open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND);
     if (!file || !file.isOpen()) {
       LOG_ERR("PEVT", "%s: outbox open failed", sub.name);
@@ -344,10 +395,11 @@ bool deliverToHandler(const DrainManifest& mf, const DrainManifest::Handler* han
 // `token` is shared across the drain: a 401-minted refresh persists to the
 // remaining lines instead of re-minting per line.
 bool deliverLine(const DrainManifest& mf, const std::string& lineText, std::string& token,
-                 const pluginhttp::Headers& config, GfxRenderer* renderer) {
+                 const pluginhttp::Headers& config, GfxRenderer* renderer, int& event) {
   JsonDocument doc;
   if (deserializeJson(doc, lineText) != DeserializationError::Ok) return true;  // corrupt line: drop
   const int e = eventFromName(doc["e"] | "");
+  event = e;
   JsonVariantConst vars = doc["vars"];
   const long long ts = doc["ts"] | 0LL;
   // Lines queued by pre-id firmware substitute {event.id} as empty.
@@ -492,8 +544,10 @@ void drain(GfxRenderer* renderer, const size_t maxEvents) {
       if (nl == std::string::npos) nl = raw.size();
       const std::string lineText = raw.substr(pos, nl - pos);
       if (!lineText.empty()) {
-        if (deliverLine(mf, lineText, token, config, renderer)) {
+        int event = -1;
+        if (deliverLine(mf, lineText, token, config, renderer, event)) {
           budget--;
+          if (event == static_cast<int>(Event::SleepEnter)) noteRefreshed(sub);
         } else {
           stalled = true;
           break;

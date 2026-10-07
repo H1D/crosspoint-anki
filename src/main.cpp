@@ -472,7 +472,7 @@ static void runRefreshWake() {
       powerManager.startDeepSleep(gpio, static_cast<uint64_t>(target - now) * 1000000ULL);
       return;
     }
-    pluginevents::emit(pluginevents::Event::SleepEnter, nullptr, 0);
+    pluginevents::emit(pluginevents::Event::SleepEnter, nullptr, 0, /*scheduled=*/true);
     pluginevents::drain(nullptr);
   }
   shutDownWifi();

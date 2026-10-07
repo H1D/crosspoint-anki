@@ -10,6 +10,7 @@
         "url": "{cfg.server}/school.bmp?kid={cfg.kid}&key={cfg.key}&depth={cfg.depth}&lang={cfg.lang}",
         "dest": "{cfg.dest}"
       },
+      "refresh_minutes": 120,
       "wake": [
         "07:55",
         "19:05"

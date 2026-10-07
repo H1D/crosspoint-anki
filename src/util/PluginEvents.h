@@ -86,7 +86,9 @@ bool wantsConnectAny();
 // Appends the event to each subscribing plugin's outbox. No-op without
 // subscribers. An outbox over the size cap is dropped wholesale first (the
 // newest events carry the current state; stale ones are worthless by then).
-void emit(Event e, const Var* vars, size_t varCount);
+// sleep.enter skips plugins whose "refresh_minutes" have not passed since
+// their last delivered sleep.enter, unless `scheduled` (a refresh wake).
+void emit(Event e, const Var* vars, size_t varCount, bool scheduled = false);
 
 // Replays queued events through their manifest handlers. Call only while WiFi
 // is connected; requests run synchronously on the calling task. At most
