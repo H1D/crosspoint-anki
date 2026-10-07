@@ -48,6 +48,8 @@ class Epub {
 
  public:
   explicit Epub(std::string filepath, const std::string& cacheDir);
+  // The cache folder a book at `filepath` gets, without loading it.
+  static std::string cachePathFor(const std::string& filepath, const std::string& cacheDir);
   ~Epub() = default;
   std::string& getBasePath() { return contentBasePath; }
   bool load(bool buildIfMissing = true, bool skipLoadingCss = false);

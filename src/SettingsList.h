@@ -51,7 +51,7 @@ inline SettingInfo buildFontFamilySetting(const SdCardFontRegistry* registry) {
   }
 
   SettingInfo s;
-  s.nameId = StrId::STR_FONT_FAMILY;
+  s.nameId = StrId::STR_DEFAULT_FONT;
   s.type = SettingType::ENUM;
   s.enumValues = std::move(enumValues);
   s.enumStringValues = std::move(allStringValues);
@@ -117,7 +117,7 @@ inline SettingInfo buildFontSizeSetting(const SdCardFontRegistry* registry) {
   }
 
   SettingInfo s;
-  s.nameId = StrId::STR_FONT_SIZE;
+  s.nameId = StrId::STR_DEFAULT_FONT_SIZE;
   s.type = SettingType::ENUM;
   s.enumStringValues = std::move(labels);
   s.key = "fontSize";
@@ -263,13 +263,14 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         // --- Reader ---
         // Built-in font-family entry. Replaced per-call with a registry-aware
         // version when SD fonts are installed.
-        SettingInfo::Enum(StrId::STR_FONT_FAMILY, &CrossPointSettings::fontFamily,
+        SettingInfo::Enum(StrId::STR_DEFAULT_FONT, &CrossPointSettings::fontFamily,
                           {StrId::STR_NOTO_SERIF, StrId::STR_NOTO_SANS}, "fontFamily", StrId::STR_CAT_READER)
             .withTextSettings(),
         // Placeholder: the selectable sizes depend on the active font family, so
         // this entry is always replaced by buildFontSizeSetting() below. It only
         // fixes the setting's position in the Reader category.
-        SettingInfo::Enum(StrId::STR_FONT_SIZE, nullptr, {}, "fontSize", StrId::STR_CAT_READER).withTextSettings(),
+        SettingInfo::Enum(StrId::STR_DEFAULT_FONT_SIZE, nullptr, {}, "fontSize", StrId::STR_CAT_READER)
+            .withTextSettings(),
         SettingInfo::Enum(StrId::STR_LINE_SPACING, &CrossPointSettings::lineSpacing,
                           {StrId::STR_TIGHT, StrId::STR_NORMAL, StrId::STR_WIDE, StrId::STR_EXTRA_WIDE}, "lineSpacing",
                           StrId::STR_CAT_READER)
@@ -554,7 +555,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             v.end());
   }
   if (registry && registry->getFamilyCount() > 0) {
-    auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_FAMILY; });
+    auto it =
+        std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_DEFAULT_FONT; });
     if (it != v.end()) {
       *it = buildFontFamilySetting(registry);
     }
@@ -562,7 +564,8 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   {
     // Unconditional: even with no SD fonts installed the sizes come from the
     // built-in family rather than a fixed Small/Medium/Large/XL enum.
-    auto it = std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_FONT_SIZE; });
+    auto it =
+        std::find_if(v.begin(), v.end(), [](const SettingInfo& s) { return s.nameId == StrId::STR_DEFAULT_FONT_SIZE; });
     if (it != v.end()) {
       *it = buildFontSizeSetting(registry);
     }

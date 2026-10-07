@@ -262,13 +262,15 @@ The Settings screen allows you to configure the device's behavior. There are a f
 
 #### 3.6.2 Reader
 
-- **Reader Font Family**: Choose the font used for reading:
+- **Default Font**: The font used for reading every book that has no font of its own:
   
   - "Noto Serif" (default) - Google's serif font
   - "Noto Sans" - Google's sans-serif font
   - Installed SD card families
 
-- **Reader Font Size**: Choose a point size. Built-in and direct TTF/OTF/TTC fonts offer 12, 14, 16, and 18 pt. A `.cpfont` family offers the sizes installed for that family.
+- **Default Font Size**: Choose a point size. Built-in and direct TTF/OTF/TTC fonts offer 12, 14, 16, and 18 pt. A `.cpfont` family offers the sizes installed for that family.
+
+- **Font per book**: A font or size picked from inside a book (reader menu → Text) is remembered for that book only and leaves the default alone. The book's font list marks the default font **Default**; picking it puts the book back on the default font and size. The book's font is kept in its cache folder (`/.crosspoint/epub_<hash>/font.json`), so **Clear Reading Cache** resets it.
 
 - **Reader Line Spacing**: Adjust the spacing between lines; options are "Tight", "Normal" (default), or "Wide".
 
@@ -582,7 +584,7 @@ There are three ways to install fonts:
 2. **Upload via web interface:** While in **File Transfer** mode, open the web UI and use the **Fonts** tab to upload `.cpfont` files. The Fonts tab does not accept TTF/OTF/TTC files.
 3. **Manual SD card copy:** Copy `.cpfont` families from the [crosspoint-fonts repository](https://github.com/crosspoint-reader/crosspoint-fonts) to `/.fonts/` or `/fonts/`. If your device have external RAM, you can also copy TTF/OTF/TTC files there without conversion.
 
-Once installed, custom fonts appear in **Settings → Reader → Font Family** alongside the built-in fonts.
+Once installed, custom fonts appear in **Settings → Reader → Default Font** and in a book's font list alongside the built-in fonts.
 
 See [docs/sd-card-fonts.md](./docs/sd-card-fonts.md) for full installation details and SD card folder structure.
 

@@ -220,6 +220,7 @@ class EpubReaderActivity final : public ReaderActivity {
   std::string getBookTitle() const override { return epub ? epub->getTitle() : ""; }
   std::string getBookAuthor() const override { return epub ? epub->getAuthor() : ""; }
   std::string getBookThumbBmpPath() const override { return epub ? epub->getThumbBmpPath() : ""; }
+  std::string bookFontCachePath() const override { return Epub::cachePathFor(bookPath, "/.crosspoint"); }
   int getProgressBasisPoints() const override;
   void renderBook() override;
   void onEndOfBookRendered() override;

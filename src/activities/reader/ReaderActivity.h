@@ -54,6 +54,9 @@ class ReaderActivity : public Activity {
   virtual void renderBook() = 0;
   virtual void applyInitialOrientation();
   virtual void onEndOfBookRendered() {}
+  // Folder that keeps this book's own font; empty for readers without
+  // a reader font (XTC pages are pre-rendered).
+  virtual std::string bookFontCachePath() const { return ""; }
 
   bool handleBackNavigation();
   /** True while the end-of-book suggestion menu is on screen and owning input. */
