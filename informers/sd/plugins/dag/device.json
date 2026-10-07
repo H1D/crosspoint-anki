@@ -1,0 +1,26 @@
+{
+  "title": "My day (Mijn dag)",
+  "description": "Weather, agenda and school news for today, tomorrow and the day after",
+  "config": {
+    "file": "config.json"
+  },
+  "events": {
+    "sleep.enter": {
+      "download": [
+        {
+          "url": "{cfg.server}/dag.bmp?offset=0&kid={cfg.kid}&key={cfg.key}&lat={cfg.lat}&lon={cfg.lon}&depth={cfg.depth}&lang={cfg.lang}",
+          "dest": "{cfg.dest_today}"
+        },
+        {
+          "url": "{cfg.server}/dag.bmp?offset=1&kid={cfg.kid}&key={cfg.key}&lat={cfg.lat}&lon={cfg.lon}&depth={cfg.depth}&lang={cfg.lang}",
+          "dest": "{cfg.dest_tomorrow}"
+        },
+        {
+          "url": "{cfg.server}/dag.bmp?offset=2&kid={cfg.kid}&key={cfg.key}&lat={cfg.lat}&lon={cfg.lon}&depth={cfg.depth}&lang={cfg.lang}",
+          "dest": "{cfg.dest_day_after}"
+        }
+      ],
+      "wake": ["06:45", "07:55", "19:05"]
+    }
+  }
+}

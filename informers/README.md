@@ -37,6 +37,7 @@ build.
 | `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `depth`, `demo=rain` |
 | `vakantie` | Rijksoverheid open data school holidays; days until the next holiday per region, simple Dutch for an 8-year-old | `regio=noord\|midden\|zuid`, `depth`, `vandaag=YYYY-MM-DD` |
 | `school` | Parro news per child, pushed twice a day by a job on Hermes's host (see `school/README.md`); stays in KV, needs `key` | `kid`, `key`, `depth`, `vandaag=YYYY-MM-DD` |
+| `dag` | One child's day: weather, the day's agenda, school news about that day. The agenda is pushed hourly by a job on Hermes's host (see `agenda/README.md`); one-off events are white on black, repeating ones a plain line | `kid`, `key`, `offset=0\|1\|2` (today, tomorrow, day after), `lat`, `lon`, `depth`, `vandaag=YYYY-MM-DD` |
 
 ## Develop and deploy
 
@@ -60,7 +61,8 @@ installed for Hermes).
 ## On the reader
 
 1. Copy `sd/plugins/weather` to `/plugins/weather` on the card (and
-   `sd/plugins/vakantie`, `sd/plugins/school`, `sd/plugins/school-sleep`),
+   `sd/plugins/vakantie`, `sd/plugins/school`, and either `sd/plugins/dag` or
+   `sd/plugins/school-sleep`: both write the sleep screen),
    create `/informers`, and edit each `config.json` (weather: lat, lon, place;
    vakantie: regio; school and school-sleep: kid and key, from
    `~/.hermes/secrets/crosspoint-school.env` on clawd).
@@ -78,7 +80,8 @@ sleeps again (see `docs/plugin-events.md`). Each image prints the time it was
 rendered. Every informer takes `lang=en` for English (`lang` in each
 `config.json`); the default is Dutch.
 
-Limits from the plugin system (weather, vakantie, school and school-sleep together
-use all 4 handlers of one sleep): one `sleep.enter` handler per plugin (so one
-image per plugin), up to 8 subscribed plugins, 4 handlers per sleep (extra
+Limits from the plugin system (weather, vakantie, school and dag together
+use all 4 events of one sleep, 6 downloads): one `sleep.enter` handler per plugin, which
+may download up to 4 images (the `dag` plugin saves today, tomorrow and the day
+after), up to 8 subscribed plugins, 4 plugins' events per sleep (extra
 informers refresh on the next sleep), 1 MB per download.

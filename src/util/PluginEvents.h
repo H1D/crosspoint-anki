@@ -23,7 +23,8 @@ class GfxRenderer;
 //   }
 //
 // A handler is either a "request" (response discarded; an acknowledgement) or
-// a "download" (response streamed to `dest` on SD, e.g. a sleep image).
+// a "download" (response streamed to `dest` on SD, e.g. a sleep image). A
+// download may be a list of up to four {url, dest} pairs.
 //
 // Execution is deferred: plugin handlers need the network, and events mostly
 // fire with WiFi down (leaving the reader, entering sleep). emit() appends one
@@ -89,8 +90,9 @@ void emit(Event e, const Var* vars, size_t varCount);
 
 // Replays queued events through their manifest handlers. Call only while WiFi
 // is connected; requests run synchronously on the calling task. At most
-// `maxEvents` handlers run per call (each is a bounded HTTPS request) so a
-// backlog cannot stall an interactive session. Successfully delivered events
+// `maxEvents` queued events are delivered per call (each one HTTPS request,
+// or up to four for a download list) so a backlog cannot stall an interactive
+// session. Successfully delivered events
 // leave the outbox; failures stay for the next drain. When `renderer` is
 // non-null, a handler's "toast" template is shown via the standard popup after
 // its request succeeds.

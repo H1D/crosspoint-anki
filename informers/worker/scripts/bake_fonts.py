@@ -12,7 +12,9 @@ import base64
 from PIL import Image, ImageDraw, ImageFont
 
 FONT_DIR = "/usr/share/fonts/noto"
-TEXT = "".join(chr(c) for c in range(32, 127)) + "°éëèêïöüáóúàç–·"
+# ASCII, Dutch accents, and Cyrillic (calendar titles in the agenda are often Russian).
+CYRILLIC = "".join(chr(c) for c in range(0x410, 0x450)) + "Ёё"
+TEXT = "".join(chr(c) for c in range(32, 127)) + "°éëèêïöüáóúàç–·" + CYRILLIC
 DIGITS = "0123456789-°"
 
 # name: (file, pixel size, characters)

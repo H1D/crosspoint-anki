@@ -10,12 +10,12 @@ import { BLACK, DARK_GRAY, GRAY, WHITE } from "../canvas.js";
 import * as F from "../fonts.js";
 import { clock, dateLong, langOf } from "../time.js";
 
-const KEY = "data";
+export const KEY = "data";
 const DAY = 86400000;
-const STALE_HOURS = 30; // two pulls a day; older than this means the job is not running
+export const STALE_HOURS = 30; // two pulls a day; older than this means the job is not running
 const KINDS = ["alarm", "todo", "event", "info"];
 // Screen text; the news itself arrives already rewritten (Dutch from the job).
-const T = {
+export const T = {
   nl: {
     label: { alarm: "LET OP", todo: "MEENEMEN / DOEN", event: "ACTIVITEIT", info: "INFO" },
     rel: ["vandaag", "morgen", "overmorgen"],
@@ -49,13 +49,13 @@ export class HttpError extends Error {
   }
 }
 
-const amsDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Amsterdam", year: "numeric", month: "2-digit", day: "2-digit" });
-const dayNr = (iso) => {
+export const amsDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Amsterdam", year: "numeric", month: "2-digit", day: "2-digit" });
+export const dayNr = (iso) => {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
   return Math.floor(Date.UTC(y, m - 1, d) / DAY);
 };
 // "vandaag", "morgen", "overmorgen", "vrijdag" (this week), or "wo 14 okt".
-function relDay(day, today, L) {
+export function relDay(day, today, L) {
   const n = dayNr(day) - today;
   if (n >= 0 && n < 3) return L.rel[n];
   const d = new Date(dayNr(day) * DAY);
@@ -66,7 +66,7 @@ function relDay(day, today, L) {
 // The fonts hold ASCII plus a few accented letters. Fold everything else
 // (curly quotes, other accents, emoji) so nothing renders as "?".
 const SAME = { "‘": "'", "’": "'", "“": '"', "”": '"', "…": "...", "€": "EUR", "—": "–", " ": " " };
-function fold(str) {
+export function fold(str) {
   let out = "";
   for (const ch of String(str ?? "")) {
     if (F.body.glyphs[ch]) out += ch;
@@ -80,7 +80,7 @@ function fold(str) {
 }
 
 // Word-wraps into at most maxLines, ending the last one with "..." if cut.
-function wrap(c, str, font, maxWidth, maxLines) {
+export function wrap(c, str, font, maxWidth, maxLines) {
   const words = fold(str).split(" ").filter(Boolean);
   const lines = [];
   let line = "";
@@ -114,7 +114,9 @@ export async function push(request, env) {
   } catch {
     throw new HttpError(400, "body is not JSON");
   }
-  if (!data || typeof data.updated !== "string" || typeof data.kids !== "object") throw new HttpError(400, "need updated and kids");
+  if (!data || Number.isNaN(Date.parse(data.updated)) || !data.kids || typeof data.kids !== "object" || Array.isArray(data.kids)) {
+    throw new HttpError(400, "need updated (a date) and kids");
+  }
   for (const [id, kid] of Object.entries(data.kids)) {
     if (!/^[a-z0-9-]+$/.test(id) || !Array.isArray(kid.items)) throw new HttpError(400, `bad kid ${id}`);
     for (const it of kid.items) {
@@ -144,7 +146,7 @@ export function pick(items, today) {
 }
 
 // White on black across the top: "MORGEN" / "Geen school", plus one line of detail.
-function alarmBlock(c, alarm, item, today, y, L) {
+export function alarmBlock(c, alarm, item, today, y, L) {
   const W = c.width;
   const when = relDay(alarm.day, today, L).toUpperCase();
   // The big font when it fits on one line, else the title font over up to two.
@@ -173,7 +175,7 @@ function alarmBlock(c, alarm, item, today, y, L) {
 }
 
 // One news item: label and day on top, bold title, up to `lines` lines of text.
-function itemBlock(c, it, today, y, lines, bottom, L) {
+export function itemBlock(c, it, today, y, lines, bottom, L) {
   const W = c.width;
   const title = wrap(c, it.title, F.bodyBold, W - 48, 1);
   let text = wrap(c, it.text, F.body, W - 48, lines);

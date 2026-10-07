@@ -155,6 +155,20 @@ One handler per event. A handler is either:
   screen renders, and the CUSTOM sleep mode reads `/sleep.bmp` first, so the
   fetched image appears on that very sleep.
 
+`download` may also be a list of up to four `{url, dest}` objects, all run
+for the same event in order (e.g. today's image plus the next two days'). The
+event counts as delivered once every download succeeded; a failure retries
+the whole list on the next drain. A `toast` shows once, after the last one.
+
+```json
+"sleep.enter": {
+  "download": [
+    { "url": "{cfg.server}/day.bmp?day=0", "dest": "/sleep.bmp" },
+    { "url": "{cfg.server}/day.bmp?day=1", "dest": "/informers/morgen.bmp" }
+  ]
+}
+```
+
 Optional per handler:
 
 - **`toast`** — a template shown as the standard popup after the request
@@ -254,7 +268,7 @@ belongs on the service's server, keyed by the id in the sidecar.
 | Request response               | 8KB (discarded)                |
 | Download                       | 1MB, streamed to SD            |
 | Subscribed plugins             | 8                              |
-| Handlers run per drain         | 4 (backlog continues next drain) |
+| Events delivered per drain     | 4 (backlog continues next drain); a download list counts as one event |
 | Sidecar / config / token files | 2KB each                       |
 
 ## Worked example: hands-free progress sync

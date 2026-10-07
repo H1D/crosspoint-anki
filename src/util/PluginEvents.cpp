@@ -39,6 +39,8 @@ constexpr size_t MAX_EVENT_RESPONSE = 8 * 1024;
 // plugin list screen, not a marketplace.
 constexpr size_t MAX_EVENT_PLUGINS = 8;
 constexpr size_t MAX_WAKE_TIMES = 4;
+// Downloads one event may list (today's image plus the next days').
+constexpr size_t MAX_DOWNLOADS_PER_EVENT = 4;
 struct Subscriber {
   char name[24] = {0};      // plugin folder name; "" = empty slot
   char dir[64] = {0};       // "<root>/<name>"
@@ -272,9 +274,32 @@ bool loadDrainManifest(const Subscriber& sub, DrainManifest& out) {
   for (JsonPairConst kv : doc["events"].as<JsonObjectConst>()) {
     const int e = eventFromName(kv.key().c_str());
     if (e < 0) continue;
+    const char* toast = kv.value()["toast"] | "";
+    // "download" is one {url, dest} or a list of them (e.g. today's image and
+    // the next days'); each becomes a handler for the same event.
+    JsonVariantConst dl = kv.value()["download"];
+    if (dl.is<JsonArrayConst>()) {
+      size_t count = 0;
+      for (JsonVariantConst one : dl.as<JsonArrayConst>()) {
+        if (count == MAX_DOWNLOADS_PER_EVENT) {
+          LOG_ERR("PEVT", "%s: downloads past %u ignored", sub.name, static_cast<unsigned>(MAX_DOWNLOADS_PER_EVENT));
+          break;
+        }
+        DrainManifest::Handler h;
+        h.event = e;
+        pluginhttp::readRequest(one, "GET", h.req);
+        h.dest = one["dest"] | "";
+        if (h.req.url.empty() || h.dest.empty()) continue;
+        // One popup per event, after its last download.
+        h.toast = toast;
+        if (count > 0) out.handlers.back().toast.clear();
+        out.handlers.push_back(std::move(h));
+        count++;
+      }
+      continue;
+    }
     DrainManifest::Handler h;
     h.event = e;
-    JsonVariantConst dl = kv.value()["download"];
     if (dl["url"].as<const char*>()) {
       pluginhttp::readRequest(dl, "GET", h.req);
       h.dest = dl["dest"] | "";
@@ -282,7 +307,7 @@ bool loadDrainManifest(const Subscriber& sub, DrainManifest& out) {
     } else {
       pluginhttp::readRequest(kv.value()["request"], "POST", h.req);
     }
-    h.toast = kv.value()["toast"] | "";
+    h.toast = toast;
     if (!h.req.url.empty()) out.handlers.push_back(std::move(h));
   }
   return true;
@@ -308,6 +333,11 @@ std::string drainSubstituted(std::string tpl, const std::string& token, const pl
   return tpl;
 }
 
+// Runs one handler for a queued line; false on a transport or auth failure.
+bool deliverToHandler(const DrainManifest& mf, const DrainManifest::Handler* handler, JsonVariantConst vars,
+                      long long ts, const char* id, const pluginhttp::Headers& meta, std::string& token,
+                      const pluginhttp::Headers& config, GfxRenderer* renderer);
+
 // Replays one queued line. True = delivered (drop the line); false = transport
 // or auth failure (keep it for the next drain). A line with no matching
 // handler counts as delivered so a manifest edit can't wedge the queue.
@@ -318,20 +348,10 @@ bool deliverLine(const DrainManifest& mf, const std::string& lineText, std::stri
   JsonDocument doc;
   if (deserializeJson(doc, lineText) != DeserializationError::Ok) return true;  // corrupt line: drop
   const int e = eventFromName(doc["e"] | "");
-  const DrainManifest::Handler* handler = nullptr;
-  for (const auto& h : mf.handlers) {
-    if (h.event == e) {
-      handler = &h;
-      break;
-    }
-  }
-  if (!handler) return true;
-
   JsonVariantConst vars = doc["vars"];
   const long long ts = doc["ts"] | 0LL;
   // Lines queued by pre-id firmware substitute {event.id} as empty.
   const char* id = doc["id"] | "";
-
   // Book-scoped events expose the book's plugin sidecar ("<book>.meta.json",
   // flat fields written at download time) as {meta.*} variables, e.g. a
   // service book id for a sync handler.
@@ -341,7 +361,17 @@ bool deliverLine(const DrainManifest& mf, const std::string& lineText, std::stri
     pluginhttp::loadConfigFile(std::string(book) + ".meta.json", meta);
     for (auto& kv : meta) kv.first = "{meta." + kv.first + "}";
   }
+  // Every handler of the event (a download list has several). A failure keeps
+  // the line queued, and the retry runs them all again.
+  for (const auto& h : mf.handlers) {
+    if (h.event == e && !deliverToHandler(mf, &h, vars, ts, id, meta, token, config, renderer)) return false;
+  }
+  return true;
+}
 
+bool deliverToHandler(const DrainManifest& mf, const DrainManifest::Handler* handler, JsonVariantConst vars,
+                      const long long ts, const char* id, const pluginhttp::Headers& meta, std::string& token,
+                      const pluginhttp::Headers& config, GfxRenderer* renderer) {
   const auto run = [&](const std::string& tok) {
     pluginhttp::Headers headers;
     headers.reserve(handler->req.headers.size());
