@@ -48,6 +48,7 @@
 #include "anki/AnkiAccountStore.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookFont.h"
 #include "util/BookmarkUtil.h"
 #include "util/ButtonNavigator.h"
 #include "util/DictionaryRegistry.h"
@@ -1030,6 +1031,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
           section.reset();
           epub->clearCache();
           epub->setupCacheDir();
+          BookFont::remember();  // font.json went with the cache folder
           if (!saveProgress(backupSpine, backupPage, backupPageCount)) {
             LOG_ERR("ERS", "Failed to save progress before cache clear");
           }
@@ -2107,6 +2109,7 @@ void EpubReaderActivity::showTextRowPopup(const int row) {
       overlayPopup.show(StrId::STR_FONT_SIZE, labels, curIdx, [this, sizes](int idx) {
         if (idx < 0 || idx >= static_cast<int>(sizes.size())) return;
         SETTINGS.fontPointSize = sizes[idx];
+        BookFont::remember();
         applyTextSettingLive();
       });
       break;

@@ -337,6 +337,27 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t readerMenuStyle = READER_MENU_LIST;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
+
+  // The reader font as one value: built-in family, SD family name, point size.
+  struct ReaderFont {
+    uint8_t family = NOTOSERIF;
+    uint8_t pointSize = DEFAULT_FONT_POINT_SIZE;
+    char sdFamilyName[32] = "";
+    bool operator==(const ReaderFont& other) const;
+  };
+  ReaderFont readerFont() const;
+  void setReaderFont(const ReaderFont& font);
+
+  // Per-book font. While a book is open, fontFamily/sdFontFamilyName/
+  // fontPointSize hold that book's font and saveToFile() keeps writing the
+  // default stashed here, so a font picked inside a book never becomes the
+  // default. Runtime only; the book's own font lives in its cache folder.
+  bool inBookFontScope() const { return bookFontScope; }
+  const ReaderFont& defaultReaderFont() const { return defaultFont; }
+  // bookFont == nullptr: the book follows the default.
+  void beginBookFontScope(const ReaderFont* bookFont);
+  // Puts the default back. Returns true when the reader font changed.
+  bool endBookFontScope();
   // Dictionary folder name under /dictionaries (empty = no dictionary)
   char dictionaryName[32] = "";
   // Show hidden files/directories (starting with '.') in the file browser (0 = hidden, 1 = show)
@@ -452,6 +473,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   float getReaderLineCompression() const;
   unsigned long getSleepTimeoutMs() const;
   int getRefreshFrequency() const;
+
+ private:
+  bool bookFontScope = false;
+  ReaderFont defaultFont;
 };
 
 // Helper macro to access settings

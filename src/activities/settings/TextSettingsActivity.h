@@ -102,6 +102,7 @@ class TextSettingsActivity final : public UiTabListActivity {
 
   Tab tab_;
   int currentFamilyIndex_ = 0;
+  int defaultFamilyIndex_ = -1;  // in a book: the default font's row, else -1
   int currentSizeIndex_ = 0;
 
   ThemeMetrics metrics_ = {};

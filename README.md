@@ -16,6 +16,10 @@ Plus [informers](#informers): weather, school news and other screens refreshed w
 | <img src="docs/anki/img/dictionary.gif" width="400"> | **Dictionaries per book language.** Put one [StarDict](docs/dictionary.md) dictionary per language in `/dictionaries/` ([WikDict](https://download.wikdict.com/dictionaries/stardict/) has most pairs); each book uses the one for its own language. Inflected words find their dictionary form (Dutch *staarde* → *staren*, *weilanden* → *weiland*; English *walked* → *walk*), and WikDict entries show as meaning → translations. Works without Anki too: long-press looks the word up. |
 | <img src="docs/anki/img/settings.png" width="400"> | **Offline first.** Cards are cached on the SD card; grades and new notes queue up and sync on demand, when you leave the review screen, or when the device goes to sleep. |
 
+## Reading
+
+**Font per book.** A font or size picked inside a book (reader menu → Text) sticks to that book. **Settings → Reader → Default Font** sets the font for every other book. In a book's font list the default is marked **Default**; picking it puts the book back on the default.
+
 ## Informers
 
 Small glanceable screens drawn by a Cloudflare Worker and shown as images: the reader downloads them each time it goes to sleep, and wakes itself at times a plugin asks for to refresh them. Adding one needs no firmware build: a Worker module plus an SD-card plugin folder ([informers/README.md](informers/README.md)). Every informer has 4-level gray and black-and-white versions, in Dutch or English (`lang` in the plugin's `config.json`).

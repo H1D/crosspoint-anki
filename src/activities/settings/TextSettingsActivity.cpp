@@ -17,6 +17,7 @@
 #include "TextSettingsPreview.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BookFont.h"
 
 namespace fui = freeink::ui;
 
@@ -92,6 +93,14 @@ void TextSettingsActivity::onEnter() {
   rebuildSizeList();
 
   currentFamilyIndex_ = findCurrentFontIndex(registry_, SETTINGS.sdFontFamilyName, SETTINGS.fontFamily);
+  // Inside a book the picked font is that book's; mark the default so going
+  // back to it is one tap.
+  if (SETTINGS.inBookFontScope()) {
+    const auto& defaultFont = SETTINGS.defaultReaderFont();
+    defaultFamilyIndex_ = findCurrentFontIndex(registry_, defaultFont.sdFamilyName, defaultFont.family);
+  } else {
+    defaultFamilyIndex_ = -1;
+  }
   // Per-tab ring positions (0 = tab bar, 1..N = row). The base reset each
   // tab's nav with followOnBuild armed, so each tab's first build shows its
   // remembered selection (Family/Size open on the current item).
@@ -222,7 +231,9 @@ void TextSettingsActivity::buildScreen(UiScreen& screen) {
   for (int i = 0; i < count; i++) {
     switch (tab_) {
       case Tab::Family:
-        rowValues_[i] = (i == currentFamilyIndex_) ? tr(STR_SELECTED) : "";
+        rowValues_[i] = (i == currentFamilyIndex_)   ? tr(STR_SELECTED)
+                        : (i == defaultFamilyIndex_) ? tr(STR_DEFAULT_VALUE)
+                                                     : "";
         break;
       case Tab::Size:
         rowValues_[i] = (i == currentSizeIndex_) ? tr(STR_SELECTED) : "";
@@ -310,6 +321,9 @@ void TextSettingsActivity::render(RenderLock&& lock) {
 void TextSettingsActivity::applyFamily(int listIndex) {
   RenderLock lock;
   const auto& font = fonts_[listIndex];
+  // Back on the default family inside a book: take its size too, so the book
+  // follows the default again instead of keeping a size snapped elsewhere.
+  if (listIndex == defaultFamilyIndex_) SETTINGS.fontPointSize = SETTINGS.defaultReaderFont().pointSize;
   if (font.isBuiltin) {
     SETTINGS.fontFamily = font.settingIndex;
     SETTINGS.sdFontFamilyName[0] = '\0';
@@ -338,7 +352,10 @@ void TextSettingsActivity::applyFamily(int listIndex) {
 void TextSettingsActivity::activateRow(int row) {
   switch (tab_) {
     case Tab::Family:
-      if (row != currentFamilyIndex_) {
+      // The default row stays tappable while only the size differs from the
+      // default: tapping it puts the book back on the default.
+      if (row != currentFamilyIndex_ ||
+          (row == defaultFamilyIndex_ && SETTINGS.fontPointSize != SETTINGS.defaultReaderFont().pointSize)) {
         applyFamily(row);
         // Persist immediately (like SettingsActivity's per-change saves): the
         // parent's result callback only runs on a normal finish(), so relying
@@ -347,6 +364,7 @@ void TextSettingsActivity::activateRow(int row) {
         // SD write happens outside its RenderLock.
         if (currentFamilyIndex_ == row) {
           SETTINGS.saveToFile();
+          BookFont::remember();  // opened from a book: the font is that book's
         }
         requestUpdate();
       }
@@ -355,6 +373,7 @@ void TextSettingsActivity::activateRow(int row) {
       if (row != currentSizeIndex_) {
         applySize(row);
         SETTINGS.saveToFile();
+        BookFont::remember();
         requestUpdate();
       }
       break;

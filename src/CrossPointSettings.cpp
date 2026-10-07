@@ -91,11 +91,13 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["frontButtonRight"] = frontButtonRight;
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
-  doc["fontFamily"] = fontFamily;
-  doc["fontSize"] = fontPointSize;
+  // Inside a book the fields hold that book's font; the file keeps the default.
+  const ReaderFont font = bookFontScope ? defaultFont : readerFont();
+  doc["fontFamily"] = font.family;
+  doc["fontSize"] = font.pointSize;
   // SD card font family name — not in SettingsList, save manually
-  if (sdFontFamilyName[0] != '\0') {
-    doc["sdFontFamilyName"] = sdFontFamilyName;
+  if (font.sdFamilyName[0] != '\0') {
+    doc["sdFontFamilyName"] = font.sdFamilyName;
   }
   // Dictionary folder name — uses dynamic getter/setter in SettingsList, save manually
   if (dictionaryName[0] != '\0') {
@@ -385,6 +387,42 @@ int CrossPointSettings::getRefreshFrequency() const {
       // counts down from here and never reaches the threshold in practice.
       return std::numeric_limits<int>::max();
   }
+}
+
+bool CrossPointSettings::ReaderFont::operator==(const ReaderFont& other) const {
+  return pointSize == other.pointSize && strcmp(sdFamilyName, other.sdFamilyName) == 0 &&
+         // The built-in family is a fallback only when an SD family is named.
+         (sdFamilyName[0] != '\0' || family == other.family);
+}
+
+CrossPointSettings::ReaderFont CrossPointSettings::readerFont() const {
+  ReaderFont font;
+  font.family = fontFamily;
+  font.pointSize = fontPointSize;
+  strncpy(font.sdFamilyName, sdFontFamilyName, sizeof(font.sdFamilyName) - 1);
+  font.sdFamilyName[sizeof(font.sdFamilyName) - 1] = '\0';
+  return font;
+}
+
+void CrossPointSettings::setReaderFont(const ReaderFont& font) {
+  fontFamily = font.family < BUILTIN_FONT_COUNT ? font.family : NOTOSERIF;
+  fontPointSize = font.pointSize;
+  strncpy(sdFontFamilyName, font.sdFamilyName, sizeof(sdFontFamilyName) - 1);
+  sdFontFamilyName[sizeof(sdFontFamilyName) - 1] = '\0';
+}
+
+void CrossPointSettings::beginBookFontScope(const ReaderFont* bookFont) {
+  if (!bookFontScope) defaultFont = readerFont();
+  bookFontScope = true;
+  setReaderFont(bookFont ? *bookFont : defaultFont);
+}
+
+bool CrossPointSettings::endBookFontScope() {
+  if (!bookFontScope) return false;
+  bookFontScope = false;
+  const bool changed = !(readerFont() == defaultFont);
+  setReaderFont(defaultFont);
+  return changed;
 }
 
 void CrossPointSettings::clearSdFontFamily() {

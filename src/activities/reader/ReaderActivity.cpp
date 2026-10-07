@@ -18,6 +18,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "XtcReaderActivity.h"
+#include "util/BookFont.h"
 #include "util/PluginEvents.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
@@ -73,6 +74,9 @@ void ReaderActivity::onEnter() {
     APP_STATE.saveToFile();
   }
 
+  // The book's own font, when it has one, replaces the default until onExit().
+  const std::string fontCachePath = bookFontCachePath();
+  if (!fontCachePath.empty()) BookFont::begin(fontCachePath);
   sdFontSystem.ensureLoaded(renderer);
   applyInitialOrientation();
 
@@ -121,6 +125,10 @@ void ReaderActivity::onExit() {
 
   endOfBookOptions.reset();
   endOfBookOptionsReady.store(false, std::memory_order_release);
+
+  // Back to the default font; screens outside the reader (Anki review, the
+  // dictionary) render with it.
+  if (BookFont::end()) sdFontSystem.ensureLoaded(renderer);
 }
 
 void ReaderActivity::prepareForSleep() { flushReaderSession(); }
