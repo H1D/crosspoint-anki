@@ -23,7 +23,7 @@ function nearestStation(stations, lat, lon) {
   return best;
 }
 
-const T = {
+export const T = {
   nl: {
     feel: ["Het vriest!", "Het is koud.", "Het is fris.", "Het is lekker weer.", "Het is warm.", "Het is heet!"],
     sky: {
@@ -100,13 +100,13 @@ const T = {
 
 const tidy = (s) => s.replace(/\s+/g, " ").replace(" .", ".");
 
-function feelSentence(t, L) {
+export function feelSentence(t, L) {
   const steps = [0, 8, 14, 20, 26];
   const i = steps.findIndex((limit) => t < limit);
   return L.feel[i === -1 ? steps.length : i];
 }
 
-function skySentence(kind, isNight, L) {
+export function skySentence(kind, isNight, L) {
   const options = L.sky[kind];
   return isNight && options[1] ? options[1] : options[0];
 }
@@ -118,7 +118,7 @@ function rainWord(mm, L) {
 }
 
 // One sentence about rain in the next two hours, from the 5-minute nowcast.
-function rainSentence(slots, L) {
+export function rainSentence(slots, L) {
   const wet = slots.map((s) => s.mm >= RAIN_MM);
   const first = wet.indexOf(true);
   if (first === -1) return L.dry2h;
@@ -133,7 +133,7 @@ function rainSentence(slots, L) {
   return tidy(L.rainIn(how, minutes));
 }
 
-function tips(temp, bft, rainSoon, L) {
+export function tips(temp, bft, rainSoon, L) {
   const out = [];
   if (rainSoon) out.push(L.tips.raincoat);
   const steps = [3, 10, 15, 20, 25];
@@ -143,7 +143,7 @@ function tips(temp, bft, rainSoon, L) {
   return out;
 }
 
-function rainChanceIndex(pct) {
+export function rainChanceIndex(pct) {
   if (pct < 30) return 0;
   if (pct < 60) return 1;
   return 2;
@@ -186,36 +186,47 @@ function demoRain() {
   return mm.map((v, i) => ({ time: start + i * 300000, mm: v }));
 }
 
+// Everything the weather screens draw from: the nearest station now, the rain
+// nowcast for the next two hours, and the day forecasts (Buienradar).
+export async function loadWeather(params) {
+  const lat = Number(params.get("lat") ?? 52.37);
+  const lon = Number(params.get("lon") ?? 4.9);
+  const [br, ba] = await Promise.all([
+    fetchJson(BUIENRADAR),
+    fetchJson(`${BUIENALARM}/${lat.toFixed(2)}/${lon.toFixed(2)}`, {
+      headers: { Referer: "https://www.buienalarm.nl/", Origin: "https://www.buienalarm.nl" },
+    }).catch(() => null),
+  ]);
+  const station = nearestStation(br.actual.stationmeasurements, lat, lon);
+  const sunrise = br.actual.sunrise.slice(11, 16);
+  const sunset = br.actual.sunset.slice(11, 16);
+  const nowClock = clock(Date.now());
+  const slots = (ba?.data ?? [])
+    .map((d) => ({ time: d.timestamp * 1000, mm: d.precipitationrate }))
+    .filter((s) => s.time > Date.now() - 5 * 60000)
+    .slice(0, 24);
+  if (params.get("demo") === "rain") slots.splice(0, slots.length, ...demoRain());
+  return {
+    station,
+    temp: Math.round(station.temperature),
+    kind: iconFor(station.weatherdescription),
+    isNight: nowClock < sunrise || nowClock > sunset,
+    slots,
+    rainSoon: slots.slice(0, 12).some((s) => s.mm >= RAIN_MM),
+    // From tomorrow on; entries carry day "YYYY-MM-DDT00:00:00".
+    days: br.forecast.fivedayforecast,
+  };
+}
+
 export default {
   title: "Weer",
   // Query: lat, lon, place (label at the top), demo=rain (fake shower), lang=en.
   async render(c, params) {
     const lang = langOf(params);
     const L = T[lang];
-    const lat = Number(params.get("lat") ?? 52.37);
-    const lon = Number(params.get("lon") ?? 4.9);
     const place = params.get("place") || "";
-
-    const [br, ba] = await Promise.all([
-      fetchJson(BUIENRADAR),
-      fetchJson(`${BUIENALARM}/${lat.toFixed(2)}/${lon.toFixed(2)}`, {
-        headers: { Referer: "https://www.buienalarm.nl/", Origin: "https://www.buienalarm.nl" },
-      }).catch(() => null),
-    ]);
-
-    const station = nearestStation(br.actual.stationmeasurements, lat, lon);
-    const temp = Math.round(station.temperature);
-    const sunrise = br.actual.sunrise.slice(11, 16);
-    const sunset = br.actual.sunset.slice(11, 16);
+    const { station, temp, kind, isNight, slots, rainSoon, days: forecast } = await loadWeather(params);
     const nowClock = clock(Date.now());
-    const isNight = nowClock < sunrise || nowClock > sunset;
-    const kind = iconFor(station.weatherdescription);
-    const slots = (ba?.data ?? [])
-      .map((d) => ({ time: d.timestamp * 1000, mm: d.precipitationrate }))
-      .filter((s) => s.time > Date.now() - 5 * 60000)
-      .slice(0, 24);
-    if (params.get("demo") === "rain") slots.splice(0, slots.length, ...demoRain());
-    const rainSoon = slots.slice(0, 12).some((s) => s.mm >= RAIN_MM);
 
     const W = c.width;
 
@@ -244,7 +255,7 @@ export default {
     c.frame(20, 606, W - 40, 20 + tipLines.length * 34, 3);
     tipLines.forEach((t, i) => c.text(t, W / 2, 640 + i * 34, F.bodyBold, { align: "center" }));
 
-    const days = br.forecast.fivedayforecast.slice(0, 4);
+    const days = forecast.slice(0, 4);
     const colW = (W - 40) / days.length;
     days.forEach((d, i) => {
       const cx = 20 + colW * i + colW / 2;

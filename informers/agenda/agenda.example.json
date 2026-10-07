@@ -1,0 +1,17 @@
+{
+  "worker": "https://crosspoint-informers.doorcomp.workers.dev",
+  "days": 3,
+  "kids": {
+    "kid1": {
+      "name": "Kid",
+      "calendars": [
+        { "env": "AGENDA_ICS_KID1" },
+        { "env": "AGENDA_ICS_FAMILY", "match": ["Kid"] }
+      ]
+    },
+    "kid2": {
+      "name": "Other",
+      "calendars": [{ "env": "AGENDA_ICS_KID2" }, { "env": "AGENDA_ICS_FAMILY", "match": ["Other"] }]
+    }
+  }
+}

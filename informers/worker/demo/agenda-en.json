@@ -1,0 +1,94 @@
+{
+ "updated": "2026-10-06T19:00:00+02:00",
+ "first": "2026-10-06",
+ "last": "2026-10-08",
+ "kids": {
+  "emma": {
+   "name": "Emma",
+   "events": [
+    {
+     "day": "2026-10-06",
+     "start": "08:30",
+     "end": "14:30",
+     "title": "School",
+     "recurring": true
+    },
+    {
+     "day": "2026-10-06",
+     "start": "15:30",
+     "end": "16:30",
+     "title": "Swimming lesson",
+     "where": "De Mirandabad",
+     "recurring": true
+    },
+    {
+     "day": "2026-10-06",
+     "start": "16:45",
+     "end": "17:15",
+     "title": "Dentist",
+     "where": "Tandarts Zuid, Ferdinand Bolstraat 12",
+     "recurring": false
+    },
+    {
+     "day": "2026-10-06",
+     "start": "19:30",
+     "title": "Reading with dad",
+     "recurring": true
+    },
+    {
+     "day": "2026-10-07",
+     "title": "Grandma's birthday",
+     "recurring": false
+    },
+    {
+     "day": "2026-10-07",
+     "start": "16:00",
+     "end": "17:00",
+     "title": "Hockey training",
+     "where": "AH&BC",
+     "recurring": true
+    },
+    {
+     "day": "2026-10-08",
+     "start": "08:30",
+     "end": "14:30",
+     "title": "School",
+     "recurring": true
+    },
+    {
+     "day": "2026-10-08",
+     "start": "13:00",
+     "end": "15:00",
+     "title": "Playdate at Noor's",
+     "recurring": false
+    },
+    {
+     "day": "2026-10-08",
+     "start": "17:00",
+     "end": "17:45",
+     "title": "Piano",
+     "recurring": true
+    }
+   ]
+  },
+  "noah": {
+   "name": "Noah",
+   "events": [
+    {
+     "day": "2026-10-06",
+     "start": "08:30",
+     "end": "14:30",
+     "title": "School",
+     "recurring": true
+    },
+    {
+     "day": "2026-10-06",
+     "start": "16:00",
+     "end": "17:00",
+     "title": "Football",
+     "recurring": true
+    }
+   ]
+  }
+ }
+}

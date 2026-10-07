@@ -1,0 +1,12 @@
+{
+  "server": "https://crosspoint-informers.doorcomp.workers.dev",
+  "kid": "CHILD",
+  "key": "READ-KEY",
+  "lat": "52.37",
+  "lon": "4.90",
+  "depth": "2",
+  "lang": "nl",
+  "dest_today": "/sleep.bmp",
+  "dest_tomorrow": "/informers/0-morgen.bmp",
+  "dest_day_after": "/informers/0-overmorgen.bmp"
+}

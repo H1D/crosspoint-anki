@@ -208,7 +208,8 @@ Read `informers/worker/src/informers/weather.js` before writing a new one; copy 
 - Worker free plan: about 10 ms CPU per request. Drawing a full screen is a few
   ms; avoid per-pixel work over large areas beyond what `rect`/`circle` do.
 - Any non-2xx response keeps the reader's previous image.
-- Plugin system: one `sleep.enter` handler per plugin (one image per plugin),
+- Plugin system: one `sleep.enter` handler per plugin; its `download` may be a
+  list of up to 4 `{url, dest}` (firmware 1.6.5-anki.8+, e.g. the `dag` plugin's three days),
   8 subscribed plugins, 4 handlers per sleep (the rest on the next sleep),
   1 MB per download, config values are substituted without URL-encoding (use
   `%20` for spaces).

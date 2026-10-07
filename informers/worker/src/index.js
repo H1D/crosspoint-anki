@@ -1,12 +1,13 @@
 // Informer screens for CrossPoint readers: GET /<name>.bmp returns a 480x800
 // BMP (1-bit, or 4-level gray with depth=2) that an SD plugin downloads on
 // sleep. Register new informers here.
+import dag, { pushAgenda } from "./informers/dag.js";
 import school, { HttpError, push as pushSchool } from "./informers/school.js";
 import vakantie from "./informers/vakantie.js";
 import weather from "./informers/weather.js";
 import { renderBmp } from "./render.js";
 
-const INFORMERS = { weather, vakantie, school };
+const INFORMERS = { weather, vakantie, school, dag };
 
 export default {
   async fetch(request, env) {
@@ -15,9 +16,10 @@ export default {
       const list = Object.keys(INFORMERS).map((n) => `/${n}.bmp`);
       return Response.json({ informers: list });
     }
-    if (url.pathname === "/school/data" && request.method === "PUT") {
+    const pushes = { "/school/data": pushSchool, "/agenda/data": pushAgenda };
+    if (pushes[url.pathname] && request.method === "PUT") {
       try {
-        return await pushSchool(request, env);
+        return await pushes[url.pathname](request, env);
       } catch (err) {
         if (err instanceof HttpError) return new Response(err.message, { status: err.status });
         throw err;
