@@ -142,7 +142,7 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
     by += (lines.length - 1) * 26;
   }
   by += 14;
-  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { nowcast, startMs, showNow }) + 4;
+  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { startMs, showNow }) + 4;
   return tipBox(c, tipList, by);
 }
 
@@ -307,14 +307,15 @@ export default {
     // Footer: how fresh each source is.
     c.rect(24, H - 34, W - 48, 1);
     const ageH = (iso) => (now - Date.parse(iso)) / 3600000;
-    if (kidAgenda && ageH(agenda.updated) > AGENDA_STALE_HOURS) {
-      c.text(L.staleAgenda, 24, H - 10, F.bodyBold);
-    } else if (school && ageH(school.updated) > STALE_HOURS) {
-      c.text(SL.stale(relDay(amsDate.format(Date.parse(school.updated)), today, SL)), 24, H - 10, F.bodyBold);
-    } else {
-      c.text(L.fresh(agenda && clock(Date.parse(agenda.updated)), school && clock(Date.parse(school.updated))), 24, H - 10, F.small);
+    let footer = [L.fresh(agenda && clock(Date.parse(agenda.updated)), school && clock(Date.parse(school.updated))), F.small];
+    if (kidAgenda && ageH(agenda.updated) > AGENDA_STALE_HOURS) footer = [L.staleAgenda, F.bodyBold];
+    else if (school && ageH(school.updated) > STALE_HOURS) footer = [SL.stale(relDay(amsDate.format(Date.parse(school.updated)), today, SL)), F.bodyBold];
+    c.text(footer[0], 24, H - 10, footer[1]);
+    // "+N meer" only where it does not run into the freshness line.
+    const more = queue.length > shown ? SL.more(queue.length - shown) : "";
+    if (more && c.textWidth(footer[0], footer[1]) + c.textWidth(more, F.small) + 16 <= W - 48) {
+      c.text(more, W - 24, H - 10, F.small, { align: "right" });
     }
-    if (queue.length > shown) c.text(SL.more(queue.length - shown), W - 24, H - 10, F.small, { align: "right" });
     return c;
   },
 };
