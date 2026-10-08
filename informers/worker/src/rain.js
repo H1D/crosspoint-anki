@@ -1,15 +1,15 @@
-// When it rains during one day, as a sentence and a row of hours with drops:
+// When it rains during one day, as a sentence and a strip of hours:
 //
 //   Regen van 9 tot 11 uur en vanaf 13 uur.
-//         💧💧            💧    💧💧💧  💧
-//   ┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴
-//   7     9     11    13    15    17    19    21
+//   [  ][  ][░░][▒▒][  ][  ][▒▒][▓▓][██][▓▓][▒▒][  ][  ][  ]
+//   7       9       11      13      15      17      19      21
 //
-// One drop is a little rain, two is rain, three is heavy rain (hourly
-// amounts from Open-Meteo); black when the ensemble says rain is likely, gray
-// when it is a maybe. Today starts at the current hour, and its first two
-// hours carry the 5-minute radar nowcast instead of the model.
-import { BLACK, DARK_GRAY, GRAY } from "./canvas.js";
+// Each hour is filled with its rain level in the panel's four grays: white
+// dry, light gray a little rain, dark gray rain, black heavy rain (hourly
+// amounts from Open-Meteo); a maybe (the ensemble unsure) is one shade
+// lighter. Today starts at the current hour, and its first two hours carry
+// the 5-minute radar nowcast instead of the model.
+import { BLACK, DARK_GRAY, GRAY, WHITE } from "./canvas.js";
 import * as F from "./fonts.js";
 import { clock } from "./time.js";
 
@@ -109,39 +109,31 @@ export function rainWhen(hours, lang) {
 
 export const dryText = (offset, lang) => T[lang].dry[offset === 0 ? 0 : 1];
 
-// A raindrop with its tip up, filled with `v`.
-function raindrop(c, cx, cy, r, v) {
-  c.circle(cx, cy, r, v);
-  const tip = r * 1.7;
-  for (let y = 0; y < tip; y++) {
-    const half = r * (1 - y / tip);
-    c.rect(cx - half, cy - y, 2 * half, 1, v);
-  }
+// Rain level per hour: 0 dry, 1 a little, 2 rain, 3 heavy. A maybe (the
+// ensemble below LIKELY) is drawn one level lighter.
+function levelOf(h) {
+  const level = h.mm < WET_MM ? 0 : h.mm < 0.5 ? 1 : h.mm < 2.5 ? 2 : 3;
+  return level && h.p < LIKELY ? Math.max(1, level - 1) : level;
 }
+const SHADES = [WHITE, GRAY, DARK_GRAY, BLACK];
 
-// Drops per hour: 1 a little rain, 2 rain, 3 heavy rain.
-const dropsFor = (mm) => (mm < WET_MM ? 0 : mm < 0.5 ? 1 : mm < 2.5 ? 2 : 3);
-
-// Draws the day as a row of hours with raindrops stacked in the rainy ones
-// (black: rain is likely, gray: a maybe) over an hour axis; returns the y
-// below it. Hours the radar nowcast covers already carry its amount. With
+// Draws the day as a strip of hours, each filled with its rain level in the
+// panel's four grays (white dry, black heavy), over an hour axis; returns the
+// y below it. Hours the radar nowcast covers already carry its amount. With
 // `showNow`, `startMs` is the first column's time and a marker shows now.
 export function rainChart(c, hours, x, y, w, lang, { startMs = 0, showNow = false } = {}) {
   const L = T[lang];
   const colW = w / hours.length;
-  const r = Math.max(4, Math.min(7, Math.floor(colW / 4.4)));
-  const step = Math.round(r * 2.9); // one drop's height plus a gap
   const top = y + 4;
-  const base = top + 3 * step + 2;
+  const h = 30;
+  const base = top + h;
 
-  hours.forEach((h, i) => {
-    const n = dropsFor(h.mm);
-    const v = h.p >= LIKELY ? BLACK : c.gray ? GRAY : DARK_GRAY;
-    const cx = x + i * colW + colW / 2;
-    for (let k = 0; k < n; k++) raindrop(c, cx, base - r - 3 - k * step, r, v);
+  hours.forEach((hr, i) => {
+    const level = levelOf(hr);
+    if (level) c.rect(Math.round(x + i * colW), top, Math.round(x + (i + 1) * colW) - Math.round(x + i * colW), h, SHADES[level]);
   });
+  c.frame(x, top, w, h + 2, 2);
 
-  c.rect(x, base, w, 2);
   // A tick every hour, a label every two. Today "nu" stands where now is.
   for (let i = 0; i <= hours.length; i++) {
     const tx = Math.min(x + i * colW, x + w - 2);
@@ -152,7 +144,7 @@ export function rainChart(c, hours, x, y, w, lang, { startMs = 0, showNow = fals
   }
   if (showNow) {
     const nx = Math.round(x + ((Date.now() - startMs) / HOUR) * colW);
-    c.rect(nx, top - 4, 2, base - top + 12, BLACK);
+    c.rect(nx - 1, top - 6, 4, h + 14, BLACK);
     c.text(L.now, Math.max(x, nx - c.textWidth(L.now, F.small) / 2), base + 28, F.small);
   }
   return base + 34;

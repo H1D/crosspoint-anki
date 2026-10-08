@@ -37,7 +37,7 @@ build.
 | `weather` | Buienradar feed (nearest station, 4-day forecast) and Buienalarm rain nowcast; simple Dutch for an 8-year-old | `lat`, `lon`, `place`, `depth`, `demo=rain` |
 | `vakantie` | Rijksoverheid open data school holidays; days until the next holiday per region, simple Dutch for an 8-year-old | `regio=noord\|midden\|zuid`, `depth`, `vandaag=YYYY-MM-DD` |
 | `school` | Parro news per child, pushed twice a day by a job on Hermes's host (see `school/README.md`); stays in KV, needs `key` | `kid`, `key`, `depth`, `vandaag=YYYY-MM-DD` |
-| `dag` | One child's day: weather with a rain row (raindrops per hour: one a little rain, three heavy rain; the next two hours from the radar), the day's agenda, school news about that day. The agenda is pushed hourly by a job on Hermes's host (see `agenda/README.md`); one-off events are white on black, repeating ones a plain line | `kid`, `key`, `offset=0\|1\|2` (today, tomorrow, day after), `lat`, `lon`, `depth`, `vandaag=YYYY-MM-DD` |
+| `dag` | One child's day: weather with a rain strip (each hour in one of four grays: white dry, black heavy rain; the next two hours from the radar), the day's agenda, school news about that day. The agenda is pushed hourly by a job on Hermes's host (see `agenda/README.md`); one-off events are white on black, repeating ones a plain line | `kid`, `key`, `offset=0\|1\|2` (today, tomorrow, day after), `lat`, `lon`, `depth`, `vandaag=YYYY-MM-DD` |
 
 ## Develop and deploy
 
