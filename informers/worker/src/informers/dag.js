@@ -118,7 +118,7 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
     temp = w.temp;
     drawIcon(c, w.kind === "sun" && w.isNight ? "partly" : w.kind, 72, y + 62, 108);
     c.text(`${temp}°`, 150, y + 74, F.big);
-    tipList = tips(temp, w.station.windspeedBft ?? 0, w.rainSoon || likelyWet, L);
+    tipList = tips(temp, w.station.windspeedBft ?? 0, (showNow && w.rainSoon) || likelyWet, L);
   } else {
     const d = w.days.find((day) => day.day.slice(0, 10) === targetIso);
     if (!d) return y;
@@ -142,7 +142,7 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
     by += (lines.length - 1) * 26;
   }
   by += 14;
-  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { startMs, showNow }) + 4;
+  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { nowcast: showNow ? nowcast : null, startMs, showNow }) + 4;
   return tipBox(c, tipList, by);
 }
 
