@@ -52,9 +52,10 @@ const T = {
 
 // The hours to show: a day view from 7 to 21, or for today from the current
 // hour to 21 (later in the evening: up to six hours, never past midnight).
+// Before 7 today is the plain day view: the night hours are not worth a bar.
 export function hourRange(offset, nowHour) {
   if (offset > 0) return { from: DAY_FROM, to: DAY_TO };
-  const from = Math.max(0, Math.min(23, nowHour));
+  const from = Math.min(23, Math.max(DAY_FROM, nowHour));
   return { from, to: Math.max(DAY_TO, Math.min(from + 6, 24)) };
 }
 
@@ -88,7 +89,7 @@ function windows(hours) {
 }
 
 // One sentence; null when the hours are dry.
-export function rainWhen(hours, lang, { fromNow = false } = {}) {
+export function rainWhen(hours, lang) {
   const L = T[lang];
   const ws = windows(hours);
   if (!ws.length) return null;
@@ -99,7 +100,8 @@ export function rainWhen(hours, lang, { fromNow = false } = {}) {
   const maybe = inWs.every((h) => h.p < MAYBE);
   const how = maybe ? L.maybe : L.how[mean < 0.5 ? "light" : mean < 2.5 ? "rain" : "heavy"];
   const spans = ws.slice(0, 2).map(([a, b]) => {
-    const first = a === 0 && !fromNow;
+    // Rain from the first hour on reads "until": raining now, or from morning.
+    const first = a === 0;
     const last = b === hours.length;
     return L.span(hours[a].hour % 24, hours[b - 1].hour % 24 + 1, first, last && !first);
   });
@@ -110,8 +112,8 @@ export const dryText = (offset, lang) => T[lang].dry[offset === 0 ? 0 : 1];
 
 // Draws the timeline at (x, y), width w; returns the y below it.
 // `nowcast` (today only) is [{ time: ms, mm }] in 5-minute steps; `startMs` is
-// the absolute time of the first hour column.
-export function rainChart(c, hours, x, y, w, lang, { nowcast = null, startMs = 0 } = {}) {
+// the absolute time of the first hour column; `showNow` marks now in it.
+export function rainChart(c, hours, x, y, w, lang, { nowcast = null, startMs = 0, showNow = false } = {}) {
   const L = T[lang];
   const barH = 34;
   const colW = w / hours.length;
@@ -145,11 +147,11 @@ export function rainChart(c, hours, x, y, w, lang, { nowcast = null, startMs = 0
   for (let i = 0; i <= hours.length; i += 2) {
     const tx = x + i * colW;
     c.rect(Math.min(tx, x + w - 2), base, 2, 6);
-    if (i === 0 && startMs) continue;
+    if (i === 0 && showNow) continue;
     const align = i === 0 ? "left" : i === hours.length ? "right" : "center";
     c.text(String((hours[0].hour + i) % 24), tx, base + 26, F.small, { align });
   }
-  if (startMs) {
+  if (showNow) {
     const nx = Math.round(x + ((Date.now() - startMs) / HOUR) * colW);
     c.rect(nx, base - barH - 2, 2, barH + 10, BLACK);
     c.text(L.now, Math.max(x, nx - c.textWidth(L.now, F.small) / 2), base + 26, F.small);
