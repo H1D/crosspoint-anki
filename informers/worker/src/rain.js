@@ -32,6 +32,7 @@ const T = {
       return a === b - 1 ? `om ${a} uur` : `van ${a} tot ${to}`;
     },
     and: "en",
+    showers: "daarna soms een bui",
     now: "nu",
   },
   en: {
@@ -45,6 +46,7 @@ const T = {
       return a === b - 1 ? `at ${a}:00` : `${a}:00–${to}`;
     },
     and: "and",
+    showers: "then now and then a shower",
     now: "now",
   },
 };
@@ -104,7 +106,9 @@ export function rainWhen(hours, lang) {
     const last = b === hours.length;
     return L.span(hours[a].hour % 24, hours[b - 1].hour % 24 + 1, first, last && !first);
   });
-  return `${how} ${spans.join(` ${L.and} `)}${ws.length > 2 ? " ..." : ""}.`;
+  // More than two spells: the first one, then "showers" for the rest.
+  if (ws.length > 2) return `${how} ${spans[0]}, ${L.showers}.`;
+  return `${how} ${spans.join(` ${L.and} `)}.`;
 }
 
 export const dryText = (offset, lang) => T[lang].dry[offset === 0 ? 0 : 1];
