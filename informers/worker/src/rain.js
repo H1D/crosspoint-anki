@@ -1,20 +1,20 @@
-// When it rains during one day, as a sentence and a strip of hours:
+// When it rains during one day, as a sentence and a bar chart of hours:
 //
 //   Regen van 9 tot 11 uur en vanaf 13 uur.
-//   [  ][  ][░░][▒▒][  ][  ][▒▒][▓▓][██][▓▓][▒▒][  ][  ][  ]
-//   7       9       11      13      15      17      19      21
+//   ┌──────────────────────────────────────────┐
+//   │      ▃▅          ▂     ▅▇█▅▃             │
+//   └┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┴──┘
+//    7     9     11    13    15    17    19    21
 //
-// Each hour is filled with its rain level in the panel's four grays: white
-// dry, light gray a little rain, dark gray rain, black heavy rain (hourly
-// amounts from Open-Meteo); a maybe (the ensemble unsure) is one shade
-// lighter. Today starts at the current hour, and its first two hours carry
-// the 5-minute radar nowcast instead of the model.
-import { BLACK, DARK_GRAY, GRAY, WHITE } from "./canvas.js";
+// Bar height is how heavy (hourly amounts from Open-Meteo, square-root
+// scale); darkness is how sure the ensemble is: black likely, dark gray
+// probably, light gray maybe. Today starts at the current hour and draws its
+// first two hours from the 5-minute radar nowcast as thin black bars.
+import { BLACK, DARK_GRAY, GRAY } from "./canvas.js";
 import * as F from "./fonts.js";
 import { clock } from "./time.js";
 
 export const WET_MM = 0.1; // an hour (or nowcast slot) below this is dry
-const LIKELY = 50; // % from the ensemble: at or above draws dark
 const MAYBE = 35; // a window whose hours all stay below this is "maybe"
 const DAY_FROM = 7;
 const DAY_TO = 21;
@@ -113,30 +113,42 @@ export function rainWhen(hours, lang) {
 
 export const dryText = (offset, lang) => T[lang].dry[offset === 0 ? 0 : 1];
 
-// Rain level per hour: 0 dry, 1 a little, 2 rain, 3 heavy. A maybe (the
-// ensemble below LIKELY) is drawn one level lighter.
-function levelOf(h) {
-  const level = h.mm < WET_MM ? 0 : h.mm < 0.5 ? 1 : h.mm < 2.5 ? 2 : 3;
-  return level && h.p < LIKELY ? Math.max(1, level - 1) : level;
-}
-const SHADES = [WHITE, GRAY, DARK_GRAY, BLACK];
+// Bar height: the amount on a square-root scale, so a drizzle still shows.
+const FULL_MM = 5;
+// Bar darkness: how sure the ensemble is.
+const shadeFor = (p) => (p >= 70 ? BLACK : p >= 40 ? DARK_GRAY : GRAY);
 
-// Draws the day as a strip of hours, each filled with its rain level in the
-// panel's four grays (white dry, black heavy), over an hour axis; returns the
-// y below it. Hours the radar nowcast covers already carry its amount. With
-// `showNow`, `startMs` is the first column's time and a marker shows now.
-export function rainChart(c, hours, x, y, w, lang, { startMs = 0, showNow = false } = {}) {
+// Draws the day as framed bars over an hour axis; returns the y below it.
+// Height is how heavy, darkness how certain. `nowcast` (today) is
+// [{ time: ms, mm }] in 5-minute steps, drawn as thin black bars over the
+// hours it covers. With `showNow`, `startMs` is the first column's time and a
+// marker shows now.
+export function rainChart(c, hours, x, y, w, lang, { nowcast = null, startMs = 0, showNow = false } = {}) {
   const L = T[lang];
   const colW = w / hours.length;
+  const barH = 48;
   const top = y + 4;
-  const h = 30;
-  const base = top + h;
+  const base = top + barH;
+  const height = (mm) => Math.max(4, Math.round((Math.sqrt(Math.min(mm, FULL_MM)) / Math.sqrt(FULL_MM)) * (barH - 4)));
 
-  hours.forEach((hr, i) => {
-    const level = levelOf(hr);
-    if (level) c.rect(Math.round(x + i * colW), top, Math.round(x + (i + 1) * colW) - Math.round(x + i * colW), h, SHADES[level]);
+  const covered = new Set();
+  if (nowcast?.length && startMs) {
+    for (const s of nowcast) {
+      const col = Math.floor((s.time - startMs) / HOUR);
+      if (col < 0 || col >= hours.length) continue;
+      covered.add(col);
+      if (s.mm < WET_MM) continue;
+      const sx = x + ((s.time - startMs) / HOUR) * colW;
+      const bh = height(s.mm);
+      c.rect(sx, base - bh, Math.max(2, colW / 12 - 0.5), bh, BLACK);
+    }
+  }
+  hours.forEach((h, i) => {
+    if (covered.has(i) || h.mm < WET_MM) return;
+    const bh = height(h.mm);
+    c.rect(x + i * colW + 2, base - bh, colW - 4, bh, shadeFor(h.p));
   });
-  c.frame(x, top, w, h + 2, 2);
+  c.frame(x, top, w, barH + 2, 2);
 
   // A tick every hour, a label every two. Today "nu" stands where now is.
   for (let i = 0; i <= hours.length; i++) {
@@ -148,7 +160,7 @@ export function rainChart(c, hours, x, y, w, lang, { startMs = 0, showNow = fals
   }
   if (showNow) {
     const nx = Math.round(x + ((Date.now() - startMs) / HOUR) * colW);
-    c.rect(nx - 1, top - 6, 4, h + 14, BLACK);
+    c.rect(nx - 1, top - 6, 3, barH + 14, BLACK);
     c.text(L.now, Math.max(x, nx - c.textWidth(L.now, F.small) / 2), base + 28, F.small);
   }
   return base + 34;
