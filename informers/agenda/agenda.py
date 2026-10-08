@@ -95,7 +95,8 @@ def day_events(ev, recurring: bool, first: date, last: date) -> list[dict]:
     party) stays on its first day only."""
     start = ev.decoded("DTSTART")
     end = ev.decoded("DTEND") if "DTEND" in ev else None
-    title = str(ev.get("SUMMARY", "")).strip()
+    # Emoji lost on the way into the calendar arrive as runs of "?".
+    title = re.sub(r"\?{2,}", "", str(ev.get("SUMMARY", ""))).strip()
     where = str(ev.get("LOCATION", "")).strip()
     base = {"title": title, "recurring": recurring}
     if where:

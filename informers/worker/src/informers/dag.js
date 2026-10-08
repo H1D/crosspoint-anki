@@ -92,8 +92,10 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
   const L = WEATHER_T[lang];
   const W = c.width;
   const now = Date.now();
-  const startMs = startOfHour(now);
   const range = hourRange(offset, hourOf(now));
+  // Today's chart starts at this hour, or at 7 when it is still night.
+  const showNow = offset === 0 && range.from === hourOf(now);
+  const startMs = startOfHour(now) + (range.from - hourOf(now)) * 3600000;
   // The radar nowcast is better than the model for the next two hours; without
   // the hourly forecast, today's timeline still shows the nowcast alone.
   const nowcast = offset === 0 && w.slots.length ? w.slots : null;
@@ -130,8 +132,8 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
   // When: the nowcast's minute-precise sentence if rain is under two hours
   // away, else the windows over the day.
   let when;
-  if (nowcast && w.rainSoon) when = rainSentence(nowcast, L);
-  else if (hours) when = rainWhen(hours, lang, { fromNow: offset === 0 }) ?? dryText(offset, lang);
+  if (nowcast && w.rainSoon && showNow) when = rainSentence(nowcast, L);
+  else if (hours) when = rainWhen(hours, lang) ?? dryText(offset, lang);
   else when = offset === 0 ? skySentence(w.kind, w.isNight, L) : null;
   let by = y + 140;
   if (when) {
@@ -140,7 +142,7 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
     by += (lines.length - 1) * 26;
   }
   by += 14;
-  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { nowcast, startMs: offset === 0 ? startMs : 0 }) + 4;
+  if (wet) by = rainChart(c, hours, 24, by, W - 48, lang, { nowcast, startMs, showNow }) + 4;
   return tipBox(c, tipList, by);
 }
 
