@@ -255,12 +255,11 @@ void DictionaryDefinitionActivity::loop() {
   int tx = 0;
   int ty = 0;
   if (mappedInput.wasScreenTapped(tx, ty)) {
-    if (offersAnkiAdd()) {
-      const ButtonRect add = addButtonRect();
-      if (tx >= add.x && tx < add.x + add.width && ty >= add.y && ty < add.y + add.height) {
-        openAnkiAdd();
-        return;
-      }
+    // Everything under the text is the add button's target: a finger that
+    // lands a few pixels off it would otherwise turn the page.
+    if (offersAnkiAdd() && ty >= addButtonRect().y - UITheme::getInstance().getMetrics().verticalSpacing) {
+      openAnkiAdd();
+      return;
     }
     if (tx < renderer.getScreenWidth() / 3) {
       if (currentPage > 0) {
