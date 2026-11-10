@@ -34,7 +34,8 @@ jobs:
           git diff --exit-code || (echo "Please run 'bin/clang-format-fix' to fix formatting issues" && exit 1)
 
   cppcheck:
-    runs-on: ubuntu-latest
+    # libpcre3 (needed by pioarduino's cppcheck) is gone from Ubuntu 26.04.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
         with:
