@@ -10,7 +10,7 @@ import { clock, dateLong, langOf, weekdayShort } from "../time.js";
 
 const BUIENRADAR = "https://data.buienradar.nl/2.0/feed/json";
 const BUIENALARM = "https://imn-rust-lb.infoplaza.io/v4/nowcast/ba/timeseries";
-// Hourly rain amount and ensemble probability for three days, local time.
+// Hourly rain amount and ensemble probability for four days (today to today + 3), local time.
 const OPEN_METEO = "https://api.open-meteo.com/v1/forecast";
 const RAIN_MM = 0.1; // below this the nowcast counts as dry
 

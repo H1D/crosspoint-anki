@@ -172,7 +172,7 @@ One handler per event. A handler is either:
   fetched image appears on that very sleep.
 
 `download` may also be a list of up to four `{url, dest}` objects, all run
-for the same event in order (e.g. today's image plus the next two days'). The
+for the same event in order (e.g. the first day's image plus the next two days'). The
 event counts as delivered once every download succeeded; a failure retries
 the whole list on the next drain. A `toast` shows once, after the last one.
 

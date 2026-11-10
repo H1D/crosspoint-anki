@@ -248,7 +248,8 @@ whole afterwards.
   account (subtitle: the deck this add goes to, Left/Right changes it for
   this add only) and an "Add" row; the note is queued once per checked
   account with its own client id. The checked set is remembered between adds
-  (first time: the last reviewed account). Tap works everywhere, so touch-only
+  and reboots (`addTarget` per account in anki.json, saved with the add;
+  none flagged: the last reviewed account). Tap works everywhere, so touch-only
   boards no longer depend on a physical Confirm.
 
 ## Add-word screen (2026-09-28)
