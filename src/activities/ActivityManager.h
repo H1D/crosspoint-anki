@@ -88,7 +88,9 @@ class ActivityManager {
   void goToFileBrowser(std::string path = {});
   void goToLibrary();
   void goToBrowser();
-  void goToAnki();
+  // The Anki dashboard. askAccount: with several enabled accounts, ask which
+  // one first (false after a sync's restart keeps the review account).
+  void goToAnki(bool askAccount = true);
   void goToPlugins(bool showOpds);
   void goToReader(std::string path, bool allowFastInitialRefresh = false);
   void goToSleep(bool fromTimeout = false, bool showPopup = true);

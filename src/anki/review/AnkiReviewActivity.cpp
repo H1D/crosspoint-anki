@@ -2,7 +2,6 @@
 
 #include <AnkiJournal.h>
 #include <AnkiPaths.h>
-#include <AnkiSyncEngine.h>
 #include <AnkiTypeAnswer.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
@@ -16,13 +15,9 @@
 #include <cstring>
 #include <iterator>
 
-#include "AnkiAccountPickerActivity.h"
-#include "AnkiSyncActivity.h"
 #include "CrossPointSettings.h"
 #include "activities/util/KeyboardEntryActivity.h"
-#include "anki/AnkiAccountStore.h"
 #include "anki/AnkiDevice.h"
-#include "anki/AnkiSecureHttp.h"
 #include "anki/AnkiStorageFs.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -58,37 +53,12 @@ EpdFontFamily::Style AnkiReviewActivity::styleOf(const ankimarkup::Run& run) {
   return EpdFontFamily::REGULAR;
 }
 
-// One enabled account reviews directly; several ask which one every time the
-// app opens (the answer becomes the review account, which exit and sleep
-// syncs refresh).
 void AnkiReviewActivity::onEnter() {
   Activity::onEnter();
-  ANKI_STORE.loadFromFile();
-  int enabledCount = 0;
-  int onlyEnabled = -1;
-  const auto& accounts = ANKI_STORE.getAccounts();
-  for (size_t i = 0; i < accounts.size(); i++) {
-    if (!accounts[i].enabled) continue;
-    enabledCount++;
-    onlyEnabled = static_cast<int>(i);
+  if (!reload()) {
+    finish();
+    return;
   }
-  if (enabledCount > 1) {
-    auto picker = makeUniqueNoThrow<AnkiAccountPickerActivity>(renderer, mappedInput);
-    if (picker) {
-      startActivityForResult(std::move(picker), [this](const ActivityResult& result) {
-        if (result.isCancelled) {
-          activityManager.goHome(HomeMenuItem::ANKI);
-          return;
-        }
-        reload();
-      });
-      return;
-    }
-    LOG_ERR("ANKI", "OOM: account picker");
-  } else if (enabledCount == 1 && ANKI_STORE.getReviewAccountIndex() != onlyEnabled) {
-    ANKI_STORE.setReviewAccount(static_cast<size_t>(onlyEnabled));
-  }
-  reload();
   requestUpdate();
 }
 
@@ -99,44 +69,29 @@ void AnkiReviewActivity::onExit() {
   }
 }
 
-void AnkiReviewActivity::reload() {
+// Builds the queue of cards this device has not graded yet and loads the
+// first. False when there is none.
+bool AnkiReviewActivity::reload() {
   RenderLock lock;
-  mode = Mode::NoAccount;
-  cache.reset();
-  cacheCount = 0;
   queue.clear();
   runs.clear();
   segments.clear();
   cursor = 0;
-
-  const AnkiAccount* account = ANKI_STORE.getReviewAccount();
-  if (!account || !account->enabled) return;
-  accountId = account->id;
-
   cache = makeUniqueNoThrow<AnkiCardCache>(AnkiStorageFs::instance(), ankipaths::cardsFile(accountId),
                                            ankipaths::cacheMetaFile(accountId));
   if (!cache) {
     LOG_ERR("ANKI", "OOM: card cache");
-    return;
+    return false;
   }
-  const std::vector<int64_t> ids = cache->cardIds();
-  cacheCount = ids.size();
   AnkiJournal journal(AnkiStorageFs::instance(), ankipaths::reviewsFile(accountId));
-  const std::vector<int64_t> graded = journal.gradedCardIds();
-  queue.reserve(cacheCount);
-  for (size_t i = 0; i < cacheCount && i < UINT16_MAX; i++) {
-    if (ids[i] == 0) continue;
-    if (std::find(graded.begin(), graded.end(), ids[i]) != graded.end()) continue;
-    queue.push_back(static_cast<uint16_t>(i));
-  }
-  LOG_DBG("ANKI", "Review queue: %u of %u cards", static_cast<unsigned>(queue.size()),
-          static_cast<unsigned>(cacheCount));
-  loadCurrent();
+  queue = AnkiCardCache::unreviewed(cache->cardIds(), journal.gradedCardIds());
+  LOG_DBG("ANKI", "Review queue: %u cards", static_cast<unsigned>(queue.size()));
+  return loadCurrent();
 }
 
 // Loads queue[cursor] into `card` and lays out its front. Bad cache lines are
-// skipped. Caller holds the RenderLock.
-void AnkiReviewActivity::loadCurrent() {
+// skipped. False past the last card. Caller holds the RenderLock.
+bool AnkiReviewActivity::loadCurrent() {
   runs.clear();
   segments.clear();
   ruleLine = -1;
@@ -147,11 +102,7 @@ void AnkiReviewActivity::loadCurrent() {
     LOG_ERR("ANKI", "Bad cache line %u, skipping", static_cast<unsigned>(queue[cursor]));
     cursor++;
   }
-  if (cursor >= queue.size()) {
-    mode = Mode::Empty;
-    card = AnkiCard();
-    return;
-  }
+  if (cursor >= queue.size()) return false;
   runs = ankimarkup::parse(card.q);
   answerRunStart = runs.size();
   typed.clear();
@@ -169,6 +120,7 @@ void AnkiReviewActivity::loadCurrent() {
   }
   mode = Mode::Front;
   layout();
+  return true;
 }
 
 // The answer's "[[type:...]]" marker becomes Anki's comparison of the typed
@@ -256,47 +208,15 @@ bool AnkiReviewActivity::typeBoxContains(const int y) const {
   return line >= typeLineFirst && line <= typeLineLast;
 }
 
-void AnkiReviewActivity::grade(const uint8_t ease) {
+// Journals the grade and moves on. False after the last card.
+bool AnkiReviewActivity::grade(const uint8_t ease) {
   AnkiJournal journal(AnkiStorageFs::instance(), ankipaths::reviewsFile(accountId));
   if (!journal.append({ankidevice::nextClientId(), card.cardId, ease, ankidevice::nowEpoch()})) {
     LOG_ERR("ANKI", "Cannot journal review for card %lld", static_cast<long long>(card.cardId));
   }
   RenderLock lock;
   cursor++;
-  loadCurrent();
-}
-
-// Back leaves the app. Pending reviews or notes go out first through the
-// sync screen, which restarts to Home afterwards.
-void AnkiReviewActivity::onBack() {
-  bool pending = false;
-  {
-    AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
-    const auto& accounts = ANKI_STORE.getAccounts();
-    pending = std::any_of(accounts.begin(), accounts.end(), [&engine](const AnkiAccount& account) {
-      return account.enabled && engine.hasPending(account);
-    });
-  }
-  if (pending) {
-    auto sync = makeUniqueNoThrow<AnkiSyncActivity>(renderer, mappedInput, AnkiSyncActivity::ReturnTo::Home);
-    if (sync) {
-      activityManager.replaceActivity(std::move(sync));
-      return;
-    }
-    LOG_ERR("ANKI", "OOM: sync activity");
-  }
-  activityManager.goHome(HomeMenuItem::ANKI);
-}
-
-void AnkiReviewActivity::startSync() {
-  auto sync = makeUniqueNoThrow<AnkiSyncActivity>(renderer, mappedInput, AnkiSyncActivity::ReturnTo::ReviewApp);
-  if (!sync) {
-    LOG_ERR("ANKI", "OOM: sync activity");
-    return;
-  }
-  // On the device the sync screen restarts back into this app on exit; the
-  // callback only runs where that restart is a no-op (simulator).
-  startActivityForResult(std::move(sync), [this](const ActivityResult&) { reload(); });
+  return loadCurrent();
 }
 
 // One body rectangle for both card sides so nothing moves on flip: the grade
@@ -457,7 +377,7 @@ void AnkiReviewActivity::layout() {
 
 void AnkiReviewActivity::loop() {
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
-    onBack();
+    finish();
     return;
   }
 
@@ -466,13 +386,6 @@ void AnkiReviewActivity::loop() {
   const bool tapped = mappedInput.wasScreenTapped(tx, ty);
 
   switch (mode) {
-    case Mode::NoAccount:
-      return;
-
-    case Mode::Empty:
-      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) || tapped) startSync();
-      return;
-
     case Mode::Front: {
       // Type-in cards: Confirm or a tap on the box opens the keyboard.
       if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
@@ -542,8 +455,12 @@ void AnkiReviewActivity::loop() {
         return;
       }
       if (ease != 0) {
-        grade(ease);
-        requestUpdate();
+        // The last grade returns to the dashboard, which shows it counted.
+        if (grade(ease)) {
+          requestUpdate();
+        } else {
+          finish();
+        }
       }
       return;
     }
@@ -635,12 +552,6 @@ void AnkiReviewActivity::drawGradeStrips() const {
 void AnkiReviewActivity::drawHints() const {
   MappedInputManager::Labels labels{};
   switch (mode) {
-    case Mode::NoAccount:
-      labels = mappedInput.mapLabels(tr(STR_BACK), "", "", "");
-      break;
-    case Mode::Empty:
-      labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_ANKI_SYNC), "", "");
-      break;
     case Mode::Front:
       labels = mappedInput.mapLabels(tr(STR_BACK), typeRun >= 0 ? tr(STR_ANKI_TYPE) : tr(STR_ANKI_SHOW_ANSWER),
                                      currentPage > 0 ? "<" : "", currentPage + 1 < totalPages ? ">" : "");
@@ -676,35 +587,18 @@ void AnkiReviewActivity::render(RenderLock&&) {
   const int contentX = isLandscapeCw ? hintGutterWidth : 0;
   const int contentWidth = renderer.getScreenWidth() - hintGutterWidth;
   const int contentY = isInverted ? metrics.buttonHintsHeight : 0;
-  const int pageHeight = renderer.getScreenHeight();
 
-  if (mode == Mode::NoAccount || mode == Mode::Empty) {
-    GUI.drawHeader(renderer, Rect{contentX, contentY + metrics.topPadding, contentWidth, metrics.headerHeight},
-                   tr(STR_ANKI));
-    const char* message = mode == Mode::NoAccount ? tr(STR_ANKI_NO_REVIEW_ACCOUNT)
-                          : cacheCount > 0        ? tr(STR_ANKI_ALL_DONE)
-                                                  : tr(STR_ANKI_NO_CARDS);
-    const int lineHeight = renderer.getLineHeight(UI_10_FONT_ID);
-    const std::vector<std::string> lines =
-        renderer.wrappedText(UI_10_FONT_ID, message, contentWidth - 2 * metrics.contentSidePadding, 4);
-    int y = (pageHeight - lineHeight * static_cast<int>(lines.size())) / 2;
-    for (const std::string& line : lines) {
-      renderer.drawCenteredText(UI_10_FONT_ID, y, line.c_str());
-      y += lineHeight;
-    }
-  } else {
-    drawHeader(contentX, contentWidth, contentY + metrics.topPadding + 10);
-    // Two-pass draw inside a prewarm scope so SD-card font glyphs load in one
-    // batch instead of one on-demand read per character.
-    const int fontId = SETTINGS.getReaderFontId();
-    const BodyArea body = bodyArea();
-    auto* fcm = renderer.getFontCacheManager();
-    auto scope = fcm->createPrewarmScope();
-    drawBody(fontId, body);
-    scope.endScanAndPrewarm();
-    drawBody(fontId, body);
-    if (mode == Mode::Back) drawGradeStrips();
-  }
+  drawHeader(contentX, contentWidth, contentY + metrics.topPadding + 10);
+  // Two-pass draw inside a prewarm scope so SD-card font glyphs load in one
+  // batch instead of one on-demand read per character.
+  const int fontId = SETTINGS.getReaderFontId();
+  const BodyArea body = bodyArea();
+  auto* fcm = renderer.getFontCacheManager();
+  auto scope = fcm->createPrewarmScope();
+  drawBody(fontId, body);
+  scope.endScanAndPrewarm();
+  drawBody(fontId, body);
+  if (mode == Mode::Back) drawGradeStrips();
 
   drawHints();
   renderer.displayBuffer();

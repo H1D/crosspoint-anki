@@ -69,7 +69,7 @@ def seeded_reviews(days_ago):
     if days_ago == 0 or days_ago == 13 or 150 <= days_ago <= 157:
         return 0
     rng = random.Random(days_ago * 7919)
-    if rng.random() < 0.08:
+    if days_ago > 13 and rng.random() < 0.08:
         return 0
     weekend = (anki_today() - datetime.timedelta(days=days_ago)).weekday() >= 5
     return int(rng.randint(12, 60) * (1.6 if weekend else 1.0))

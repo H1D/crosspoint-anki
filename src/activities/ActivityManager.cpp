@@ -13,7 +13,7 @@
 #include "CrossPointSettings.h"
 #include "HapticFeedback.h"
 #include "OpdsServerStore.h"
-#include "anki/review/AnkiReviewActivity.h"
+#include "anki/review/AnkiDashboardActivity.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
 #include "browser/OpdsBookBrowserActivity.h"
@@ -297,10 +297,10 @@ void ActivityManager::goToBrowser() {
   }
 }
 
-void ActivityManager::goToAnki() {
-  auto activity = makeUniqueNoThrow<AnkiReviewActivity>(renderer, mappedInput);
+void ActivityManager::goToAnki(const bool askAccount) {
+  auto activity = makeUniqueNoThrow<AnkiDashboardActivity>(renderer, mappedInput, askAccount);
   if (!activity) {
-    LOG_ERR("ACT", "OOM: Anki review activity");
+    LOG_ERR("ACT", "OOM: Anki dashboard activity");
     return;
   }
   replaceActivity(std::move(activity));
@@ -356,7 +356,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
-    } else if (activityName == "AnkiReview" || activityName == "AnkiSync") {
+    } else if (activityName == "AnkiDashboard" || activityName == "AnkiSync") {
       initialMenuItem = HomeMenuItem::ANKI;
     }
   }
