@@ -390,3 +390,54 @@ whole afterwards.
   otherwise on the usual starting layout. The language within a script is
   not picked: accented letters would hint at the answer.
 
+## Dashboard (2026-11-10)
+
+- **Opening Anki shows a dashboard, not the first card.** Three numbers
+  (cards left to review, today's reviews, day streak), a heatmap of reviews
+  per day and a status row ("Synced today", "N pending"). Confirm reviews,
+  Right syncs, Left switches account, Back leaves after the exit sync. Left
+  out: retention and time spent (neither backend reports them), a per-deck
+  breakdown, a "less/more" legend. The review screen only reviews: Back or
+  the last grade returns to the dashboard, which counts the new grades from
+  the journal at once.
+- **The account picker stays on open** ("Account picker instead of a fixed
+  review account" above): with several enabled accounts it still asks first,
+  then shows that account's dashboard. After a manual sync's restart the
+  dashboard opens on the account just synced, without asking.
+- **History comes from the server, merged with the journal at read time.**
+  `stats.json` per account holds the server's reviews per day (AnkiDo
+  `GET /stats?days=371`, AnkiConnect `getNumCardsReviewedByDay`) for 371 days,
+  the most any orientation draws. The dashboard adds the journal's grades,
+  which the server has not counted yet. A grade without `answered_at` (every
+  X4 grade: no RTC) counts as today, where the server will put it.
+- **Stats are refetched after every exchange that acknowledged a review**,
+  including the sleep-entry and exit syncs, and once per account in every
+  manual sync. The rule lives in `AnkiSyncEngine::exchange`, so no caller can
+  forget it. The journal drops a review the moment the server takes it;
+  without the refetch a sleep sync would wipe today's square until the next
+  manual sync. The stats file has one writer (the engine), and a failed fetch
+  only undercounts until the next one. Rejected: folding acknowledged reviews
+  into the file on the device (a second writer, and a crash between the two
+  writes counts twice). Cost: one extra request per acknowledging session.
+- **The server's day boundary, not the device's time zone.** AnkiDo's
+  `next_day_at` ends the Anki day; its label is the newest key when something
+  was reviewed today, else the device date the day started on. AnkiConnect
+  names no boundary, so the device uses the next local 04:00 (Anki's default
+  rollover). Days are placed in whole 86400 s steps from that boundary, so
+  pending grades can sit one day off for an hour around a DST change until
+  the next fetch. AnkiDo formats its keys in the server's time zone; a
+  follow-up could add `today_date` to `/stats` so the label never depends on
+  the device's zone.
+- **Two device clocks.** Days on screen and the AnkiConnect boundary use
+  `ankidevice::wallEpoch()` (RTC, else the SNTP-synced system clock). The
+  journal's `answered_at` stays RTC-only: a drifted time could be rejected,
+  and rejected reviews are dropped.
+- **Four fills, relative to a typical day.** The panel has white, a 25 %
+  dot dither, a 50 % checkerboard and black. A day with no reviews is a small
+  dot, under half the median of the nonzero days is 25 %, half or more 50 %,
+  the median or more black. An empty today is outlined. 14 px cells on a
+  16 px pitch in every orientation; as many weeks as fit (25 in portrait, 45
+  in landscape); Monday on top.
+- **Portrait in practice.** The dashboard lays itself out for any
+  orientation, but only the reader applies the reading orientation, and it
+  resets to portrait on exit, so the Anki screens open in portrait.
