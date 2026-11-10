@@ -26,6 +26,9 @@ class AnkiCardCache {
   // run when the review app opens, unlike load() per index.
   std::vector<int64_t> cardIds();
   static int64_t lineCardId(const std::string& line);
+  // Cache indices of the cards still to review: a card id that this device
+  // has not graded. One rule for the review queue and the dashboard count.
+  static std::vector<uint16_t> unreviewed(const std::vector<int64_t>& ids, const std::vector<int64_t>& graded);
 
   struct Meta {
     AnkiCounts counts;

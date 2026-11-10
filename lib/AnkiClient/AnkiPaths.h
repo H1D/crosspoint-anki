@@ -13,6 +13,7 @@
 //   /.crosspoint/anki/<id>/reviews.jsonl  pending reviews (journal)
 //   /.crosspoint/anki/<id>/notes.jsonl    pending add-word notes
 //   /.crosspoint/anki/<id>/decks.json     deck list from the last sync
+//   /.crosspoint/anki/<id>/stats.json     reviews per day from the last stats fetch
 namespace ankipaths {
 
 inline const char* root() { return "/.crosspoint/anki"; }
@@ -23,5 +24,6 @@ inline std::string cacheMetaFile(uint32_t id) { return accountDir(id) + "/cache.
 inline std::string reviewsFile(uint32_t id) { return accountDir(id) + "/reviews.jsonl"; }
 inline std::string notesFile(uint32_t id) { return accountDir(id) + "/notes.jsonl"; }
 inline std::string decksFile(uint32_t id) { return accountDir(id) + "/decks.json"; }
+inline std::string statsFile(uint32_t id) { return accountDir(id) + "/stats.json"; }
 
 }  // namespace ankipaths
