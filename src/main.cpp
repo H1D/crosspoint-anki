@@ -287,9 +287,10 @@ static bool loadSleepFrameBuffer() {
 
 // Pushes pending Anki reviews and notes before sleeping, when a saved network
 // is at hand and the battery can afford the radio. Upload only: no deck fetch,
-// no card download. Bounded: 10 s to join, 4 s per request, 15 s overall
-// checked before every request. Failures are silent; the queue stays for the
-// next session. The popup is skipped for Quick Resume, whose sleep frame is
+// no card download. Bounded: 10 s to join, 4 s per request, 15 s overall,
+// checked before each account and before notes (an upload that acks reviews
+// also fetches stats, which can run one request past it). Failures are
+// silent; the queue stays for the next session. The popup is skipped for Quick Resume, whose sleep frame is
 // the current framebuffer.
 static void syncAnkiBeforeSleep(const bool showPopup) {
   if (!ANKI_STORE.hasEnabledAccounts()) return;

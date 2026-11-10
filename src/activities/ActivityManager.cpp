@@ -356,7 +356,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem, bool cleanInitialRefr
       initialMenuItem = HomeMenuItem::FILE_TRANSFER;
     } else if (activityName == "Settings") {
       initialMenuItem = HomeMenuItem::SETTINGS_MENU;
-    } else if (activityName == "AnkiDashboard" || activityName == "AnkiSync") {
+    } else if (activityName == "AnkiDashboard" || activityName == "AnkiReview" || activityName == "AnkiSync") {
       initialMenuItem = HomeMenuItem::ANKI;
     }
   }
