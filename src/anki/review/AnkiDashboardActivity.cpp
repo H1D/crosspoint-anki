@@ -94,6 +94,7 @@ void AnkiDashboardActivity::pickAccount() {
   if (!picker) {
     LOG_ERR("ANKI", "OOM: account picker");
     refresh();
+    requestUpdate();
     return;
   }
   startActivityForResult(std::move(picker), [this](const ActivityResult& result) {
@@ -115,8 +116,9 @@ void AnkiDashboardActivity::refresh() {
   accountId = account->id;
   accountName = account->name;
   ankistats::loadStudy(AnkiStorageFs::instance(), accountId, ankidevice::wallEpoch(), study);
-  LOG_DBG("ANKI", "Dashboard: %u to review, %u today, streak %u, %u pending", study.toReview, study.reviewedToday,
-          study.streak, study.pending);
+  LOG_DBG("ANKI", "Dashboard: %u to review, %u today, streak %u, %u pending", static_cast<unsigned>(study.toReview),
+          static_cast<unsigned>(study.reviewedToday), static_cast<unsigned>(study.streak),
+          static_cast<unsigned>(study.pending));
 }
 
 void AnkiDashboardActivity::run(const Action action) {
