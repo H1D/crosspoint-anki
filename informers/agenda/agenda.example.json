@@ -1,6 +1,6 @@
 {
   "worker": "https://crosspoint-informers.doorcomp.workers.dev",
-  "days": 3,
+  "days": 4,
   "kids": {
     "kid1": {
       "name": "Kid",

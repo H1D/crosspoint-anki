@@ -2,11 +2,13 @@
 
 The `dag` informer shows one child's day: weather, agenda, school news. The
 agenda comes from the family's Google calendars. A job on Hermes's host
-(clawd) reads them and pushes the next three days to the Worker; the Worker
+(clawd) reads them and pushes today and the next three days to the Worker; the Worker
 never sees a calendar address.
 
 1. `agenda.py` downloads each calendar from its secret iCal address, expands
-   repeating events, and keeps the events of today and the next two days.
+   repeating events, and keeps the events of today and the next three days
+   (`days` in the config, default 4). From 18:00 the readers show tomorrow
+   first, so their third picture is today + 3.
 2. An event is `recurring` when it belongs to a series (RRULE/RDATE, or a moved
    occurrence of one). Everything else is a one-off, drawn white on black.
 3. A calendar entry can carry `match`: then only events whose title or

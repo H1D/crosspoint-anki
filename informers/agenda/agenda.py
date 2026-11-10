@@ -177,7 +177,8 @@ def run(args) -> int:
         print(f"agenda informer: no config at {CONFIG} ({err})", file=sys.stderr)
         return 2
     first = now.date()
-    last = first + timedelta(days=cfg.get("days", 3) - 1)
+    # Four days: from 18:00 the third page of the day informer shows today + 3.
+    last = first + timedelta(days=cfg.get("days", 4) - 1)
     cache: dict = {}
     try:
         kids = {kid_id: {"name": k["name"], "events": kid_events(k, first, last, cache)} for kid_id, k in cfg["kids"].items()}
