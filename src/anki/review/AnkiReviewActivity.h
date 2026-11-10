@@ -11,14 +11,15 @@
 #include "activities/Activity.h"
 #include "util/ButtonNavigator.h"
 
-// Flashcard review for the review account: shows the cached queue one card
-// at a time (front, flip, grade) and journals each grade for the next sync.
+// Flashcard review for one account, opened from the Anki dashboard: shows the
+// cards left in its cached queue one at a time (front, flip, grade), journals
+// each grade for the next sync and finishes after the last card or on Back.
 // Only the current card and its styled runs live in RAM; the cache is read
 // one line at a time.
 class AnkiReviewActivity final : public Activity {
  public:
-  explicit AnkiReviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("AnkiReview", renderer, mappedInput) {}
+  AnkiReviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t accountId)
+      : Activity("AnkiReview", renderer, mappedInput), accountId(accountId) {}
 
   void onEnter() override;
   void onExit() override;
@@ -26,7 +27,7 @@ class AnkiReviewActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class Mode { NoAccount, Empty, Front, Back };
+  enum class Mode { Front, Back };
 
   // One run's portion on one wrapped line: byte span of runs[run].text,
   // drawn at x within the body. Width is kept so cloze boxes need no re-measure.
@@ -49,15 +50,13 @@ class AnkiReviewActivity final : public Activity {
   BodyArea bodyArea() const;
   int gradeStripHeight() const;
   int gradeStripTop() const;
-  void reload();
-  void loadCurrent();
+  bool reload();
+  bool loadCurrent();
   void flip();
-  void grade(uint8_t ease);
+  bool grade(uint8_t ease);
   void openTypeKeyboard();
   bool typeBoxContains(int y) const;
   std::vector<ankimarkup::Run> withTypeComparison(std::vector<ankimarkup::Run> answer) const;
-  void onBack();
-  void startSync();
   void layout();
   int measure(int fontId, const char* text, size_t len, EpdFontFamily::Style style) const;
   void drawBody(int fontId, const BodyArea& body) const;
@@ -67,10 +66,9 @@ class AnkiReviewActivity final : public Activity {
   const char* kindLabel() const;
   static EpdFontFamily::Style styleOf(const ankimarkup::Run& run);
 
-  Mode mode = Mode::NoAccount;
-  uint32_t accountId = 0;
+  const uint32_t accountId;
+  Mode mode = Mode::Front;
   std::unique_ptr<AnkiCardCache> cache;
-  size_t cacheCount = 0;
   std::vector<uint16_t> queue;  // cache indices still to review, in cache order
   size_t cursor = 0;
   AnkiCard card;

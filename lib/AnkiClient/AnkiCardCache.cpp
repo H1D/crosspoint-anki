@@ -1,5 +1,7 @@
 #include "AnkiCardCache.h"
 
+#include <algorithm>
+
 #include "AnkiJson.h"
 
 std::string AnkiCardCache::toLine(const AnkiCard& c) {
@@ -100,6 +102,16 @@ std::vector<int64_t> AnkiCardCache::cardIds() {
   }
   f->close();
   return ids;
+}
+
+std::vector<uint16_t> AnkiCardCache::unreviewed(const std::vector<int64_t>& ids, const std::vector<int64_t>& graded) {
+  std::vector<uint16_t> out;
+  out.reserve(ids.size());
+  for (size_t i = 0; i < ids.size() && i < UINT16_MAX; i++) {
+    if (ids[i] == 0 || std::find(graded.begin(), graded.end(), ids[i]) != graded.end()) continue;
+    out.push_back(static_cast<uint16_t>(i));
+  }
+  return out;
 }
 
 size_t AnkiCardCache::count() {

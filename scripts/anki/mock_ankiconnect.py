@@ -5,8 +5,11 @@ Serves the actions crosspoint-anki uses, with the response shapes of the real
 add-on (including CSS-prefixed card HTML and the <hr id=answer> answer side).
 Logs every request to stderr and to /tmp/mock_ankiconnect.jsonl.
 """
+import datetime
 import json
+import random
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 API_KEY = sys.argv[2] if len(sys.argv) > 2 else None
@@ -50,6 +53,37 @@ CARDS = {
 }
 MODELS = {"Basic": ["Front", "Back"], "Basic (and reversed card)": ["Front", "Back"]}
 notes_added = []
+ROLLOVER_HOUR = 4  # Anki's default "next day starts at"
+answered_by_day = {}  # Anki day -> cards answered through answerCards
+
+
+def anki_today():
+    """The Anki day as AnkiConnect labels it: local date, shifted by the rollover."""
+    return (datetime.datetime.fromtimestamp(time.time()) - datetime.timedelta(hours=ROLLOVER_HOUR)).date()
+
+
+def seeded_reviews(days_ago):
+    """A made-up year of study: busier weekends, a rest day now and then, a
+    week off in early summer and a gap 13 days ago (so the streak reads 12
+    before reviewing on the device). Nothing seeded for today."""
+    if days_ago == 0 or days_ago == 13 or 150 <= days_ago <= 157:
+        return 0
+    rng = random.Random(days_ago * 7919)
+    if days_ago > 13 and rng.random() < 0.08:
+        return 0
+    weekend = (anki_today() - datetime.timedelta(days=days_ago)).weekday() >= 5
+    return int(rng.randint(12, 60) * (1.6 if weekend else 1.0))
+
+
+def reviewed_by_day():
+    today = anki_today()
+    out = []
+    for i in range(400):
+        d = today - datetime.timedelta(days=i)
+        n = seeded_reviews(i) + answered_by_day.get(d, 0)
+        if n:
+            out.append([d.isoformat(), n])
+    return out  # newest first, like the add-on
 
 
 def find_cards(query):
@@ -107,7 +141,11 @@ def handle(req):
             })
         return out
     if action == "answerCards":
-        return [a["cardId"] in CARDS for a in params["answers"]]
+        results = [a["cardId"] in CARDS for a in params["answers"]]
+        answered_by_day[anki_today()] = answered_by_day.get(anki_today(), 0) + sum(results)
+        return results
+    if action == "getNumCardsReviewedByDay":
+        return reviewed_by_day()
     if action == "modelFieldNames":
         if params["modelName"] not in MODELS:
             raise Exception("model was not found: " + params["modelName"])

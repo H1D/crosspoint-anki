@@ -20,6 +20,8 @@
 //              text markup on the device (AnkiHtml).
 //   pushNotes  addNote per queued note; field names come from modelFieldNames.
 //   fetchDecks deckNames + getDeckStats -> decks.json.
+//   fetchStats getNumCardsReviewedByDay -> stats.json, days anchored on the
+//              device clock (the add-on names no day boundary).
 // AnkiConnect has no client ids: every review in a request that the server
 // answered is treated as delivered, so a lost response can grade a card twice.
 class AnkiConnectClient {
@@ -31,6 +33,7 @@ class AnkiConnectClient {
   AnkiSyncResult exchange(const AnkiAccount& account, bool wantCards);
   AnkiSyncResult pushNotes(const AnkiAccount& account);
   AnkiSyncResult fetchDecks(const AnkiAccount& account);
+  AnkiSyncResult fetchStats(const AnkiAccount& account);
 
   // Request body for one action (public for tests). `params` is a JSON object
   // literal or empty.

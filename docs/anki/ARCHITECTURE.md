@@ -18,18 +18,22 @@ lib/AnkiClient/          host-testable core (no Arduino types, no ArduinoJson)
   AnkiJournal.*          pending reviews (reviews.jsonl)
   AnkiNoteQueue.*        pending add-word notes (notes.jsonl) + ankinote:: builders
   AnkiCardCache.*        cached queue (cards.jsonl + cache.json)
-  AnkiSyncEngine.*       one sync session per account (exchange, notes, decks); dispatches per backend
-  AnkiConnectClient.*    the same three steps spoken as AnkiConnect actions (Anki desktop)
+  AnkiStats.*            reviews per day for the dashboard (stats.json): wire parsers, day anchor,
+                         merge with the journal, streak, heatmap levels
+  AnkiSyncEngine.*       one sync session per account (exchange, stats, notes, decks); dispatches per backend
+  AnkiConnectClient.*    the same steps spoken as AnkiConnect actions (Anki desktop)
 test/anki_client/        gtest suite: cmake -S test -B build/test && cmake --build build/test --target AnkiClientTest
 scripts/anki/mock_ankiconnect.py  stand-in AnkiConnect for simulator runs (python3 scripts/anki/mock_ankiconnect.py 8777)
 
 src/anki/                firmware side
   AnkiStorageFs.*        AnkiFs over HalStorage      -> AnkiStorageFs::instance()
   AnkiSecureHttp.*       AnkiHttp over SecureHttpClient -> AnkiSecureHttp::instance()
-  AnkiDevice.*           ankidevice::deviceId(), nextClientId(), nowEpoch()
+  AnkiDevice.*           ankidevice::deviceId(), nextClientId(), nowEpoch() (RTC, for answered_at),
+                         wallEpoch() (RTC or SNTP clock, for days on screen and the engine clock)
   AnkiAccountStore.*     ANKI_STORE singleton, /.crosspoint/anki.json
   settings/              account list / editor / deck picker activities   (agent: settings)
-  review/                AnkiReviewActivity, AnkiSyncActivity              (agent: review)
+  review/                AnkiDashboardActivity (app entry), AnkiAccountPickerActivity,
+                         AnkiReviewActivity, AnkiSyncActivity              (agent: review)
   AnkiAddNoteActivity.*  add-word modal                                    (agent: add-word)
 ```
 
@@ -42,7 +46,7 @@ src/anki/                firmware side
 #include "anki/AnkiSecureHttp.h"
 #include "anki/AnkiStorageFs.h"
 
-AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
+AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::wallEpoch);
 const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
 for (size_t i = 0; i < ANKI_STORE.getCount(); i++) {
   const AnkiAccount& a = ANKI_STORE.getAccounts()[i];
@@ -52,6 +56,14 @@ for (size_t i = 0; i < ANKI_STORE.getCount(); i++) {
   AnkiSyncEngine::Result r = engine.syncAccount(a, wantCards);
   // r.ok / r.error / r.authFailed / r.cardsFetched / r.reviewsAcked / r.notesAcked
 }
+```
+
+Dashboard numbers (read only; one call fills everything the screen draws):
+
+```cpp
+// `study` is an ankistats::Study activity member (~400 B), never a stack local.
+ankistats::loadStudy(AnkiStorageFs::instance(), accountId, ankidevice::wallEpoch(), study);
+// study.toReview / reviewedToday / streak / pending / syncedDaysAgo, study.levelOn(day) for the heatmap
 ```
 
 Grading a card (review app):
@@ -87,6 +99,17 @@ auto runs = ankimarkup::parse(card.q);       // bold/italic/cloze/newline runs; 
 
 Deck names for pickers: `engine.loadDecks(account.id)` (cached by the last sync).
 
+SD layout per account, `/.crosspoint/anki/<id>/` (`AnkiPaths.h`):
+
+```
+cards.jsonl    cached queue, one card per line        engine (sync)
+cache.json     counts + fetch time of the cache       engine (sync)
+reviews.jsonl  grades not yet acknowledged            review screen appends, engine rewrites
+notes.jsonl    add-word notes not yet sent            add-word appends, engine rewrites
+decks.json     deck list from the last sync           engine (sync)
+stats.json     reviews per day from the last fetch    engine (sync, and after every acked exchange)
+```
+
 Backends: `account.backend` (`AnkiBackend::AnkiDo` or `AnkiConnect`) decides
 which server the engine talks to. Activities never branch on it; the only
 visible differences are the editor labels (URL / token vs. AnkiConnect URL /
@@ -97,9 +120,13 @@ API key) and empty `card.next[]` labels for AnkiConnect cards.
 - **RAM**: never read cards.jsonl whole; never keep more than one AnkiCard plus
   its runs alive. Responses are streamed by the engine. ESP32-C3 has ~380 KB.
 - **Wi-Fi sessions end in a silent restart** (`SilentRestart.h`), like
-  KOReaderSyncActivity. The review app restarts back into itself after a manual
-  sync (`silentRestartToAnki()`, added by the review agent in main.cpp);
+  KOReaderSyncActivity. The Anki app restarts back onto its dashboard after a
+  manual sync (`silentRestartToAnki()` -> `goToAnki(false)` in main.cpp);
   exit- and sleep-triggered syncs restart to home.
+- **Review history**: `stats.json` counts what the server has; the journal
+  holds what it has not. `AnkiSyncEngine::exchange` refetches stats whenever
+  it acknowledged a review, so the two never hold the same review. Only the
+  engine writes `stats.json`; the dashboard only reads.
 - **Tokens never leave the device** except as the Authorization header to the
   account's own URL. The web API reports `hasToken`, never the token.
 - **All user-facing text through `tr(STR_...)`**; keys are predefined at the

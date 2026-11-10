@@ -287,13 +287,14 @@ static bool loadSleepFrameBuffer() {
 
 // Pushes pending Anki reviews and notes before sleeping, when a saved network
 // is at hand and the battery can afford the radio. Upload only: no deck fetch,
-// no card download. Bounded: 10 s to join, 4 s per request, 15 s overall
-// checked before every request. Failures are silent; the queue stays for the
-// next session. The popup is skipped for Quick Resume, whose sleep frame is
+// no card download. Bounded: 10 s to join, 4 s per request, 15 s overall,
+// checked before each account and before notes (an upload that acks reviews
+// also fetches stats, which can run one request past it). Failures are
+// silent; the queue stays for the next session. The popup is skipped for Quick Resume, whose sleep frame is
 // the current framebuffer.
 static void syncAnkiBeforeSleep(const bool showPopup) {
   if (!ANKI_STORE.hasEnabledAccounts()) return;
-  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
+  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::wallEpoch);
   bool pending = false;
   for (const AnkiAccount& account : ANKI_STORE.getAccounts()) {
     if (account.enabled && engine.hasPending(account)) {
@@ -799,7 +800,8 @@ void setup() {
     // Back out of the WiFi rows and the user is where they left off, not on Home.
     activityManager.goToSettings();
   } else if (resume == BootResume::Silent && snapshotTarget == SILENT_REBOOT_TARGET_ANKI) {
-    activityManager.goToAnki();
+    // Back from a manual sync: the dashboard of the account just synced.
+    activityManager.goToAnki(/*askAccount=*/false);
   } else if (resume == BootResume::Silent) {
     // target == home (or reader with no open book): land on home — don't fall
     // through to the sleep-wake "resume reader" logic, which fires on stale

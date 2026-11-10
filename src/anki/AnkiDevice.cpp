@@ -3,6 +3,7 @@
 #include <AnkiPaths.h>
 #include <HalClock.h>
 #include <Logging.h>
+#include <TrustedTime.h>
 #include <esp_mac.h>
 
 #include <array>
@@ -63,6 +64,11 @@ int64_t nowEpoch() {
   // back to UTC epoch seconds.
   const time_t t = mktime(&local);
   return t <= 0 ? 0 : static_cast<int64_t>(t);
+}
+
+int64_t wallEpoch() {
+  const int64_t rtc = nowEpoch();
+  return rtc > 0 ? rtc : trustedtime::trustedNow();
 }
 
 }  // namespace ankidevice
