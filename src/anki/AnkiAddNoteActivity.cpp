@@ -308,7 +308,7 @@ void AnkiAddNoteActivity::queueNotes() {
     }
   }
 
-  ANKI_STORE.recordAdd(choices);
+  if (!ANKI_STORE.recordAdd(choices)) LOG_ERR("ANKI", "Failed to save the add-word accounts and decks");
 
   if (failed == 0) {
     // One account: its pending count; several: how many accounts got the note.
