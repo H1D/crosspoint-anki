@@ -1,6 +1,6 @@
 {
   "title": "My day (Mijn dag)",
-  "description": "Weather, agenda and school news for today, tomorrow and the day after",
+  "description": "Weather, agenda and school news: today, or from 18:00 tomorrow, and the next two days",
   "config": {
     "file": "config.json"
   },
@@ -24,6 +24,7 @@
       "wake": [
         "06:45",
         "07:55",
+        "18:05",
         "19:05"
       ]
     }

@@ -1,11 +1,11 @@
 My day (Mijn dag)
 
 How to see it:
-1. Set Settings → Display → Sleep Screen to Custom. Today's picture is the sleep screen.
-2. Press the power button to put the reader to sleep. While going to sleep the reader fetches three pictures when the last ones are more than 2 hours old (it needs WiFi it has connected to before, and at least 20% battery). It also wakes itself at 06:45, 07:55 and 19:05 to refresh them.
-3. Tomorrow and the day after are in Browse Files → "informers": 0-morgen.bmp and 0-overmorgen.bmp. Press Left or Right to flip between informers. Press Back to leave.
+1. Set Settings → Display → Sleep Screen to Custom. The first picture is the sleep screen: today until 18:00, tomorrow after that, so in the evening you go to bed with the day you wake up to.
+2. Press the power button to put the reader to sleep. While going to sleep the reader fetches three pictures when the last ones are more than 2 hours old (it needs WiFi it has connected to before, and at least 20% battery). It also wakes itself at 06:45, 07:55, 18:05 and 19:05 to refresh them (18:05 is when the sleep screen moves on to tomorrow, 19:05 picks up the school news of 19:00).
+3. The next two days are in Browse Files → "informers": 0-morgen.bmp and 0-overmorgen.bmp. Press Left or Right to flip between informers. Press Back to leave.
 
-What it shows, for one child and one day: the weather (today: now; tomorrow and the day after: the forecast) with, when it rains, a sentence and a bar chart of the hours saying when (a taller bar is heavier rain; black: rain is likely, dark gray: probably, light gray: maybe; today the first two hours come from the rain radar), the day's agenda from the family calendars, and school news about that day. Something that happens only once (a dentist visit, a birthday) is white on black with a "!", so it stands out from the weekly routine. No school on that day puts a black bar at the top.
+What it shows, for one child and one day: the weather (today: now; other days: the forecast) with, when it rains, a sentence and a bar chart of the hours saying when (a taller bar is heavier rain; black: rain is likely, dark gray: probably, light gray: maybe; for today the first two hours come from the rain radar), the day's agenda from the family calendars, and school news about that day (the latest news without a day only on the first picture). Something that happens only once (a dentist visit, a birthday) is white on black with a "!", so it stands out from the weekly routine. No school on that day puts a black bar at the top.
 
 The agenda is read from the calendars every hour, the school news at 07:50 and 19:00. The bottom line says when each was last read.
 
@@ -17,6 +17,6 @@ Changing settings: edit config.json in this plugin's folder on a computer (take 
 - lat, lon: where to take the weather for
 - depth: 2 for gray shades, 1 for plain black and white
 - lang: nl for Dutch (the default), en for English
-- dest_today, dest_tomorrow, dest_day_after: where the three pictures go
+- dest_today, dest_tomorrow, dest_day_after: where the first, second and third picture go (the names stay, but from 18:00 the pictures are one day later)
 
 Needs firmware 1.6.5-anki.8 or newer (one plugin saving several pictures).

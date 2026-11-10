@@ -1,6 +1,8 @@
 // One child's day on one screen: the weather, the day's agenda, and school
-// news. `offset=1|2` draws tomorrow or the day after, so a plugin can save
-// three days at once (today on the sleep screen, the next two in /informers).
+// news. `offset=1|2` draws the day after the first, and the one after that, so
+// a plugin can save three days at once (the first on the sleep screen, the next
+// two in /informers). The first day is today, or from 18:00 tomorrow: the kid
+// going to bed should see the day they wake up to.
 //
 // The agenda comes from a job on Hermes's host (informers/agenda/) that reads
 // the family calendars and pushes each child's events for the next days here
@@ -17,10 +19,10 @@ import { WET_MM, dryText, hourOf, hourRange, hoursOf, rainChart, rainWhen, start
 const AGENDA_KEY = "agenda";
 const DAY = 86400000;
 const AGENDA_STALE_HOURS = 12;
+const EVENING = 18; // Amsterdam hour from which every page moves one day on
 
 const T = {
   nl: {
-    rel: ["Vandaag", "Morgen", "Overmorgen"],
     agenda: "AGENDA",
     school: "SCHOOL",
     allDay: "hele dag",
@@ -34,7 +36,6 @@ const T = {
     at: "om",
   },
   en: {
-    rel: ["Today", "Tomorrow", "Day after tomorrow"],
     agenda: "AGENDA",
     school: "SCHOOL",
     allDay: "all day",
@@ -86,19 +87,19 @@ export async function pushAgenda(request, env) {
   return Response.json({ ok: true, kids: Object.keys(data.kids), events: Object.values(data.kids).map((k) => k.events.length) });
 }
 
-// Today: the station now and rain from now on. Later days: the forecast. Rain
-// gets a sentence saying when, and a timeline when there is any.
-function weatherBlock(c, w, offset, targetIso, lang, y) {
+// Today (ahead 0): the station now and rain from now on. Later days: the
+// forecast. Rain gets a sentence saying when, and a timeline when there is any.
+function weatherBlock(c, w, ahead, targetIso, lang, y) {
   const L = WEATHER_T[lang];
   const W = c.width;
   const now = Date.now();
-  const range = hourRange(offset, hourOf(now));
+  const range = hourRange(ahead, hourOf(now));
   // Today's chart starts at this hour, or at 7 when it is still night.
-  const showNow = offset === 0 && range.from === hourOf(now);
+  const showNow = ahead === 0 && range.from === hourOf(now);
   const startMs = startOfHour(now) + (range.from - hourOf(now)) * 3600000;
   // The radar nowcast is better than the model for the next two hours; without
   // the hourly forecast, today's timeline still shows the nowcast alone.
-  const nowcast = offset === 0 && w.slots.length ? w.slots : null;
+  const nowcast = ahead === 0 && w.slots.length ? w.slots : null;
   let hours = hoursOf(w.hourly, targetIso, range);
   if (!hours && nowcast) hours = Array.from({ length: range.to - range.from }, (_, i) => ({ hour: range.from + i, mm: 0, p: 0 }));
   if (hours && nowcast) {
@@ -114,7 +115,7 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
 
   let temp;
   let tipList;
-  if (offset === 0) {
+  if (ahead === 0) {
     temp = w.temp;
     drawIcon(c, w.kind === "sun" && w.isNight ? "partly" : w.kind, 72, y + 62, 108);
     c.text(`${temp}°`, 150, y + 74, F.big);
@@ -133,8 +134,8 @@ function weatherBlock(c, w, offset, targetIso, lang, y) {
   // away, else the windows over the day.
   let when;
   if (nowcast && w.rainSoon && showNow) when = rainSentence(nowcast, L);
-  else if (hours) when = rainWhen(hours, lang) ?? dryText(offset, lang);
-  else when = offset === 0 ? skySentence(w.kind, w.isNight, L) : null;
+  else if (hours) when = rainWhen(hours, lang) ?? dryText(ahead, lang);
+  else when = ahead === 0 ? skySentence(w.kind, w.isNight, L) : null;
   let by = y + 140;
   if (when) {
     const lines = wrap(c, when, F.small, W - 174, 2);
@@ -208,8 +209,9 @@ const eventBlock = (c, ev, y, L, draw) => (ev.recurring ? routine : oneOff)(c, e
 
 export default {
   title: "Dag",
-  // Query: kid, key (school read key), offset=0|1|2, lat, lon, depth,
-  // vandaag=YYYY-MM-DD to pretend it is another day, lang=en.
+  // Query: kid, key (school read key), offset=0|1|2 (days after the first day),
+  // lat, lon, depth, lang=en,
+  // vandaag=YYYY-MM-DD to pretend it is that day at noon (so no evening shift).
   async render(c, params, env) {
     const lang = langOf(params);
     const L = T[lang];
@@ -233,7 +235,11 @@ export default {
     const fake = params.get("vandaag");
     const now = fake ? Date.parse(`${fake}T12:00:00Z`) : Date.now();
     const today = dayNr(fake || amsDate.format(now));
-    const target = today + offset;
+    // From EVENING the first day is tomorrow. `ahead` is how far the drawn day
+    // is from today; `offset` stays the page (0 is the sleep screen).
+    const shift = hourOf(now) >= EVENING ? 1 : 0;
+    const ahead = offset + shift;
+    const target = today + ahead;
     const targetIso = new Date(target * DAY).toISOString().slice(0, 10);
     const targetMs = target * DAY + DAY / 2;
     const W = c.width;
@@ -241,7 +247,8 @@ export default {
     const bottom = H - 40;
 
     // Header: the day in big letters, so "Morgen" never reads as today.
-    c.text(L.rel[offset], 24, 50, F.title);
+    const label = relDay(targetIso, today, SL);
+    c.text(label[0].toUpperCase() + label.slice(1), 24, 50, F.title);
     const name = kid?.name ?? kidAgenda?.name ?? kidId;
     c.text(fold(name), W - 24, 48, F.bodyBold, { align: "right" });
     c.text(dateLong(targetMs, lang), 24, 86, F.body);
@@ -249,7 +256,7 @@ export default {
     c.rect(24, 100, W - 48, 3);
 
     let y = 108;
-    if (weather) y = weatherBlock(c, weather, offset, targetIso, lang, y);
+    if (weather) y = weatherBlock(c, weather, ahead, targetIso, lang, y);
 
     // School off on this day changes the whole day: it goes first.
     const picked = kid ? pick(kid.items, today) : { alarms: [], list: [] };
@@ -292,7 +299,7 @@ export default {
       }
     }
 
-    // School news about this day, then (today only) the latest news.
+    // School news about this day, then (first page only) the latest news.
     y = sectionBar(c, L.school, y + 4);
     const queue = news;
     let shown = 0;
