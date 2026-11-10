@@ -26,9 +26,11 @@ struct AnkiNoteDraft {
 // subtitle, then an "Add" row that queues one note per checked account
 // (notes.jsonl) for the next sync. Left/Right cycle the highlighted account's
 // deck; a long press on its row (Confirm hold or touch) opens the deck list.
-// The deck a note is added to becomes the account's default deck; the
-// checked set is remembered across adds. The result is cancelled unless
-// notes were queued.
+// The deck a note is added to becomes the account's default deck, and the
+// checked set is saved per account (anki.json "addTarget") by the same
+// write; toggling rows alone saves nothing. With none of the enabled
+// accounts flagged, the review account is preselected. The result is
+// cancelled unless notes were queued.
 class AnkiAddNoteActivity final : public UiListActivity {
  public:
   explicit AnkiAddNoteActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, AnkiNoteDraft draft)

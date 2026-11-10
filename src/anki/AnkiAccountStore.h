@@ -50,6 +50,17 @@ class AnkiAccountStore : public PersistableStore<AnkiAccountStore> {
   const AnkiAccount* getReviewAccount() const;
   bool setReviewAccount(size_t index);
 
+  // One enabled account's state after an add-word: whether it was ticked and,
+  // when a note was queued for it, the deck used (empty = leave lastDeck).
+  struct AddChoice {
+    size_t index;
+    bool checked;
+    std::string deck;
+  };
+  // Stores the ticked set (addTarget) and decks of one add with a single
+  // save, skipped when nothing changed.
+  bool recordAdd(const std::vector<AddChoice>& choices);
+
   // Remembers the deck last used by add-word for this account (saved).
   bool setLastDeck(size_t index, const std::string& deck);
 };

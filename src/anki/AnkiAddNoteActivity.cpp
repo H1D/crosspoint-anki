@@ -30,24 +30,6 @@ constexpr const char* DEFAULT_DECK = "Default";
 // Confirm hold on an account row that opens its deck list.
 constexpr unsigned long DECK_HOLD_MS = 500;
 
-// Accounts checked on the last add, kept across modals (ids, so store edits
-// in between cannot re-target them). Empty until the first open.
-std::vector<uint32_t> checkedAccountIds;
-bool checkedInitialised = false;
-
-bool isChecked(const uint32_t id) {
-  return std::find(checkedAccountIds.begin(), checkedAccountIds.end(), id) != checkedAccountIds.end();
-}
-
-void setChecked(const uint32_t id, const bool checked) {
-  const auto it = std::find(checkedAccountIds.begin(), checkedAccountIds.end(), id);
-  if (checked && it == checkedAccountIds.end()) {
-    checkedAccountIds.push_back(id);
-  } else if (!checked && it != checkedAccountIds.end()) {
-    checkedAccountIds.erase(it);
-  }
-}
-
 }  // namespace
 
 void AnkiAddNoteActivity::onEnter() {
@@ -99,17 +81,14 @@ void AnkiAddNoteActivity::buildTargets() {
     t.label = a.name.empty() ? a.url : a.name;
     t.decks = deckChoices(a);
     t.deckPos = 0;
-    t.checked = false;
+    t.checked = a.addTarget;
     targets.push_back(std::move(t));
   }
   if (targets.empty()) return;
 
-  // First open: the review account, else the first enabled one. Later opens
-  // reuse the remembered set; when none of it is still enabled, fall back the
-  // same way so Add never silently does nothing.
-  if (checkedInitialised) {
-    for (Target& t : targets) t.checked = isChecked(t.id);
-  }
+  // No enabled account flagged (first use, or the flagged ones were disabled
+  // or removed): the review account, else the first enabled one, so Add never
+  // silently does nothing.
   if (!anyChecked()) {
     const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
     Target* pick = &targets.front();
@@ -117,10 +96,7 @@ void AnkiAddNoteActivity::buildTargets() {
       if (static_cast<int>(t.storeIndex) == reviewIdx) pick = &t;
     }
     pick->checked = true;
-    checkedAccountIds.clear();
-    checkedAccountIds.push_back(pick->id);
   }
-  checkedInitialised = true;
 }
 
 bool AnkiAddNoteActivity::anyChecked() const {
@@ -234,7 +210,6 @@ void AnkiAddNoteActivity::activateIndex(const int index) {
   {
     RenderLock lock;
     t.checked = !t.checked;
-    setChecked(t.id, t.checked);
     refreshRows();
   }
   requestUpdate();
@@ -246,7 +221,6 @@ void AnkiAddNoteActivity::openDeckPicker(const size_t targetIndex) {
   if (!t.checked) {
     RenderLock lock;
     t.checked = true;
-    setChecked(t.id, true);
     refreshRows();
   }
   const std::string& current = t.decks[static_cast<size_t>(t.deckPos)];
@@ -308,7 +282,10 @@ void AnkiAddNoteActivity::queueNotes() {
   size_t pending = 0;
   size_t queued = 0;
   size_t failed = 0;
+  std::vector<AnkiAccountStore::AddChoice> choices;
+  choices.reserve(targets.size());
   for (const Target& t : targets) {
+    choices.push_back({t.storeIndex, t.checked, {}});
     if (!t.checked || t.storeIndex >= accounts.size()) continue;
     const AnkiAccount& account = accounts[t.storeIndex];
     // An account that never synced has no data directory yet.
@@ -324,13 +301,14 @@ void AnkiAddNoteActivity::queueNotes() {
     if (queue.append(note)) {
       pending = queue.count();
       queued++;
-      // The next add starts on this deck.
-      ANKI_STORE.setLastDeck(t.storeIndex, note.deck);
+      choices.back().deck = note.deck;  // the next add starts on this deck
     } else {
       LOG_ERR("ANKI", "Failed to queue note for account %u", static_cast<unsigned>(t.id));
       failed++;
     }
   }
+
+  ANKI_STORE.recordAdd(choices);
 
   if (failed == 0) {
     // One account: its pending count; several: how many accounts got the note.

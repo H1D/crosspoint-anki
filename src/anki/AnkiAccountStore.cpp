@@ -34,6 +34,7 @@ void AnkiAccountStore::toJson(JsonDocument& doc) const {
     for (const auto& d : a.decks) decks.add(d);
     obj["cacheSize"] = a.cacheSize;
     obj["lastDeck"] = a.lastDeck;
+    obj["addTarget"] = a.addTarget;
   }
 }
 
@@ -67,6 +68,7 @@ bool AnkiAccountStore::fromJson(JsonVariantConst doc) {
     // Not read: per-day limits are Anki deck options; 0 = no fetch cap.
     a.maxNewPerDay = 0;
     a.lastDeck = obj["lastDeck"] | "";
+    a.addTarget = obj["addTarget"] | false;
     JsonArrayConst decks = obj["decks"].as<JsonArrayConst>();
     a.decks.reserve(decks.size());
     for (JsonVariantConst d : decks) {
@@ -167,6 +169,23 @@ bool AnkiAccountStore::setReviewAccount(size_t index) {
   if (index >= accounts.size()) return false;
   reviewAccountId = accounts[index].id;
   return saveToFile();
+}
+
+bool AnkiAccountStore::recordAdd(const std::vector<AddChoice>& choices) {
+  bool changed = false;
+  for (const AddChoice& c : choices) {
+    if (c.index >= accounts.size()) continue;
+    AnkiAccount& a = accounts[c.index];
+    if (a.addTarget != c.checked) {
+      a.addTarget = c.checked;
+      changed = true;
+    }
+    if (!c.deck.empty() && a.lastDeck != c.deck) {
+      a.lastDeck = c.deck;
+      changed = true;
+    }
+  }
+  return !changed || saveToFile();
 }
 
 bool AnkiAccountStore::setLastDeck(size_t index, const std::string& deck) {
