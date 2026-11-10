@@ -432,10 +432,11 @@ whole afterwards.
   `ankidevice::wallEpoch()` (RTC, else the SNTP-synced system clock). The
   journal's `answered_at` stays RTC-only: a drifted time could be rejected,
   and rejected reviews are dropped.
-- **Four fills, relative to a typical day.** The panel has white, a 25 %
+- **Four fills, by quartile.** The panel has white, a 25 %
   dot dither, a 50 % checkerboard and black. A day with no reviews is a small
-  dot, under half the median of the nonzero days is 25 %, half or more 50 %,
-  the median or more black. An empty today is outlined. 14 px cells on a
+  dot. Of the days with reviews, the lower half is 25 %, the next quarter
+  50 % and the busiest quarter black, as on GitHub (a median threshold made
+  half of all study days black). An empty today is outlined. 14 px cells on a
   16 px pitch in every orientation; as many weeks as fit (25 in portrait, 45
   in landscape); Monday on top.
 - **Portrait in practice.** The dashboard lays itself out for any

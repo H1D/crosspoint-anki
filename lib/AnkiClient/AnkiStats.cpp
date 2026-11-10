@@ -300,20 +300,22 @@ void merge(const History* history, const std::vector<AnkiJournal::Entry>& pendin
   out.streak = static_cast<uint16_t>(gap - first);
   out.streakCapped = gap == merged.end() && out.streak > 0;
 
-  // Levels relative to a typical day: the median of the nonzero days.
+  // Levels by quartile of the nonzero days, as GitHub does: the busiest
+  // quarter is black, the next quarter 50 %, the lower half 25 %.
   std::vector<uint16_t> nonzero;
   nonzero.reserve(DAYS);
   std::copy_if(merged.begin(), merged.end(), std::back_inserter(nonzero), [](const uint16_t n) { return n > 0; });
-  uint32_t typical = 0;
+  uint16_t median = 0;
+  uint16_t upper = 0;
   if (!nonzero.empty()) {
-    const auto mid = nonzero.begin() + static_cast<std::ptrdiff_t>(nonzero.size() / 2);
-    std::nth_element(nonzero.begin(), mid, nonzero.end());
-    typical = *mid;
+    std::sort(nonzero.begin(), nonzero.end());
+    median = nonzero[nonzero.size() / 2];
+    upper = nonzero[nonzero.size() * 3 / 4];
   }
-  std::transform(merged.begin(), merged.end(), std::begin(out.level), [typical](const uint16_t n) -> uint8_t {
+  std::transform(merged.begin(), merged.end(), std::begin(out.level), [median, upper](const uint16_t n) -> uint8_t {
     if (n == 0) return 0;
-    if (n >= typical) return 3;
-    return 2u * n >= typical ? 2 : 1;
+    if (n >= upper) return 3;
+    return n >= median ? 2 : 1;
   });
 
   if (history && now > 0) {

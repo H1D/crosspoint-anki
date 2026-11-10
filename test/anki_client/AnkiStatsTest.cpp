@@ -243,16 +243,11 @@ TEST(AnkiStatsMerge, DatedGradesLandOnTheirDayClampedToToday) {
   EXPECT_EQ(s.streak, 1);
 }
 
-TEST(AnkiStatsMerge, LevelsFollowTheMedianDay) {
+TEST(AnkiStatsMerge, LevelsFollowQuartiles) {
   Study s;
-  // Nonzero days 5, 20, 40, 41, 60: a typical day is 40.
-  ankistats::merge(historyWith({5, 20, 40, 41, 60}).get(), {}, NOON, s);
-  EXPECT_EQ(s.level[0], 1);
-  EXPECT_EQ(s.level[1], 2);
-  EXPECT_EQ(s.level[2], 3);
-  EXPECT_EQ(s.level[3], 3);
-  EXPECT_EQ(s.level[4], 3);
-  EXPECT_EQ(s.level[5], 0);
+  ankistats::merge(historyWith({10, 20, 30, 40, 50, 60, 70, 80}).get(), {}, NOON, s);
+  const uint8_t expected[] = {1, 1, 1, 1, 2, 2, 3, 3, 0};
+  for (size_t i = 0; i < sizeof(expected); i++) EXPECT_EQ(s.level[i], expected[i]) << "day today - " << i;
   EXPECT_EQ(s.levelOn(s.today + 1), 0);
   EXPECT_EQ(s.levelOn(s.today - ankistats::DAYS), 0);
 }
