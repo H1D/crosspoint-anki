@@ -14,6 +14,7 @@
 #include "AnkiPaths.h"
 #include "AnkiStats.h"
 #include "MemFs.h"
+#include "ScopedTz.h"
 
 using ankistats::Anchor;
 using ankistats::History;
@@ -21,30 +22,6 @@ using ankistats::StatsParser;
 using ankistats::Study;
 
 namespace {
-
-class ScopedTz {
- public:
-  explicit ScopedTz(const char* tz) {
-    if (const char* old = getenv("TZ")) {
-      saved = old;
-      hadTz = true;
-    }
-    setenv("TZ", tz, 1);
-    tzset();
-  }
-  ~ScopedTz() {
-    if (hadTz) {
-      setenv("TZ", saved.c_str(), 1);
-    } else {
-      unsetenv("TZ");
-    }
-    tzset();
-  }
-
- private:
-  std::string saved;
-  bool hadTz = false;
-};
 
 AnkiDay day(const char* iso) { return ankistats::parseIso(iso); }
 

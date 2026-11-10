@@ -293,7 +293,7 @@ static bool loadSleepFrameBuffer() {
 // the current framebuffer.
 static void syncAnkiBeforeSleep(const bool showPopup) {
   if (!ANKI_STORE.hasEnabledAccounts()) return;
-  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
+  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::wallEpoch);
   bool pending = false;
   for (const AnkiAccount& account : ANKI_STORE.getAccounts()) {
     if (account.enabled && engine.hasPending(account)) {

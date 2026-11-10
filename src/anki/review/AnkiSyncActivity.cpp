@@ -74,7 +74,7 @@ void AnkiSyncActivity::onWifiSelectionComplete(const bool success) {
 }
 
 void AnkiSyncActivity::performSync() {
-  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::nowEpoch);
+  AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::wallEpoch);
   const auto& accounts = ANKI_STORE.getAccounts();
   const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
 

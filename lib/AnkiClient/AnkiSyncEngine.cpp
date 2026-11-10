@@ -4,6 +4,7 @@
 #include "AnkiJson.h"
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
+#include "AnkiStats.h"
 #include "AnkiTypeAnswer.h"
 
 namespace {
@@ -75,8 +76,13 @@ std::string AnkiSyncEngine::buildExchangeBody(const AnkiAccount& account,
   return body;
 }
 
-AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, bool wantCards) {
-  if (account.isAnkiConnect()) return connect.exchange(account, wantCards);
+AnkiSyncEngine::Result AnkiSyncEngine::exchange(const AnkiAccount& account, const bool wantCards) {
+  Result r = account.isAnkiConnect() ? connect.exchange(account, wantCards) : exchangeAnkiDo(account, wantCards);
+  if (r.reviewsAcked > 0) fetchStats(account);
+  return r;
+}
+
+AnkiSyncEngine::Result AnkiSyncEngine::exchangeAnkiDo(const AnkiAccount& account, const bool wantCards) {
   Result r;
   AnkiJournal journal(fs, ankipaths::reviewsFile(account.id));
   const std::vector<AnkiJournal::Entry> pending = journal.load();
@@ -400,6 +406,36 @@ AnkiSyncEngine::Result AnkiSyncEngine::fetchDecks(const AnkiAccount& account) {
   return r;
 }
 
+AnkiSyncEngine::Result AnkiSyncEngine::fetchStats(const AnkiAccount& account) {
+  if (account.isAnkiConnect()) return connect.fetchStats(account);
+  Result r;
+  ankistats::StatsParser parser(ankistats::StatsParser::Format::AnkiDo);
+  ankijson::Reader reader(parser.callbacks());
+  std::string errorBody;
+  const int status = http.request("GET", account.apiBase() + "/stats?days=" + std::to_string(ankistats::DAYS),
+                                  authHeaders(account), "", [&](int st, const uint8_t* data, size_t len) {
+                                    if (st >= 200 && st < 300) {
+                                      reader.feed(reinterpret_cast<const char*>(data), len);
+                                      return !reader.hasError();
+                                    }
+                                    if (errorBody.size() < 1024)
+                                      errorBody.append(reinterpret_cast<const char*>(data), len);
+                                    return true;
+                                  });
+  classify(r, status);
+  if (!r.ok) {
+    ErrorCollector ec;
+    ec.reader.feed(errorBody);
+    r.error = ec.text().empty() ? statusText(status) : ec.text();
+    return r;
+  }
+  if (reader.hasError() || !ankistats::saveAnswer(fs, account.id, parser, clock ? clock() : 0)) {
+    r.ok = false;
+    r.error = "Stats not saved";
+  }
+  return r;
+}
+
 std::vector<AnkiDeck> AnkiSyncEngine::loadDecks(uint32_t accountId) {
   std::string text;
   if (!fs.readAll(ankipaths::decksFile(accountId), text)) return {};
@@ -416,6 +452,9 @@ bool AnkiSyncEngine::hasPending(const AnkiAccount& account) {
 AnkiSyncEngine::Result AnkiSyncEngine::syncAccount(const AnkiAccount& account, bool wantCards) {
   Result total = exchange(account, wantCards);
   if (!total.ok) return total;
+  // exchange() already fetched them when it acknowledged reviews. Like the
+  // deck list, stats never fail the session.
+  if (total.reviewsAcked == 0) fetchStats(account);
 
   const Result notes = pushNotes(account);
   total.notesSent = notes.notesSent;

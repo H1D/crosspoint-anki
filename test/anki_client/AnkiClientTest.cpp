@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <string>
@@ -13,8 +14,10 @@
 #include "AnkiMarkup.h"
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
+#include "AnkiStats.h"
 #include "AnkiSyncEngine.h"
 #include "MemFs.h"
+#include "ScopedTz.h"
 
 namespace {
 
@@ -341,9 +344,10 @@ TEST(AnkiSyncEngine, ExchangeStreamsCardsAndAcksReviews) {
   EXPECT_EQ(r.counts.returned, 2);
   EXPECT_EQ(r.syncError, "sync timed out");
 
-  ASSERT_EQ(http.seen.size(), 1u);
+  ASSERT_EQ(http.seen.size(), 2u);
   EXPECT_EQ(http.seen[0].url, "http://anki.local:8766/v1/p/alice/exchange");
   EXPECT_EQ(http.seen[0].headers[0].second, "Bearer akd_x");
+  EXPECT_EQ(http.seen[1].url, "http://anki.local:8766/v1/p/alice/stats?days=371") << "acked reviews refresh stats";
 
   const auto left = journal.load();
   ASSERT_EQ(left.size(), 1u);
@@ -441,8 +445,9 @@ TEST(AnkiSyncEngine, NonReviewAccountOnlyPushes) {
   EXPECT_EQ(r.reviewsAcked, 1u);
   EXPECT_EQ(r.cardsFetched, 0u);  // cards ignored, cache untouched
   EXPECT_FALSE(fs.exists(ankipaths::cardsFile(a.id)));
-  ASSERT_EQ(http.seen.size(), 1u);
+  ASSERT_EQ(http.seen.size(), 2u);
   EXPECT_NE(http.seen[0].body.find("\"limit\":1"), std::string::npos);
+  EXPECT_EQ(http.seen[1].method, "GET");
 }
 
 TEST(AnkiSyncEngine, PushNotesAcksAllButErrors) {
@@ -501,9 +506,80 @@ TEST(AnkiSyncEngine, SyncAccountRunsAllSteps) {
   EXPECT_TRUE(r.ok) << r.error;
   EXPECT_EQ(r.cardsFetched, 2u);
   EXPECT_EQ(r.notesAcked, 1u);
-  EXPECT_EQ(http.seen.size(), 3u);
+  EXPECT_EQ(http.seen.size(), 4u);  // exchange, stats (reviews were acked), notes, decks
   EXPECT_FALSE(engine.hasPending(a));
   EXPECT_EQ(engine.loadDecks(a.id).size(), 1u);
+}
+
+// Reviews per day: 4 yesterday, 2 today (reviewed_today > 0 makes the newest
+// key today's label).
+const char* kStatsResponse = R"({"reviewed_by_day":{"2026-11-09":4,"2026-11-10":2},"reviewed_today":2,"decks":[],)"
+                             R"("day_rollover_hour":4,"next_day_at":1794369600,"today":812})";
+constexpr int64_t kNoon = 1794312000;  // 2026-11-10 12:00 UTC
+
+size_t statsRequests(const FakeHttp& http) {
+  return static_cast<size_t>(std::count_if(http.seen.begin(), http.seen.end(), [](const FakeHttp::Seen& s) {
+    return s.url.find("/stats?days=") != std::string::npos;
+  }));
+}
+
+TEST(AnkiSyncEngine, AckedReviewsMoveFromJournalToStats) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, [] { return kNoon; });
+  const AnkiAccount a = testAccount();
+  AnkiJournal journal(fs, ankipaths::reviewsFile(a.id));
+  journal.append({"dev-1", 111, 3, 0});
+  journal.append({"dev-2", 112, 3, 0});
+  journal.append({"dev-4", 114, 3, 0});  // not echoed: still pending
+  http.responses["POST /v1/p/alice/exchange"] = {
+      200, R"({"reviews":[{"status":"applied","client_id":"dev-1"},{"status":"duplicate","client_id":"dev-2"}]})"};
+  http.responses["GET /v1/p/alice/stats?days=371"] = {200, kStatsResponse};
+
+  // The sleep-entry sync's call: upload only, yet stats follow the ack.
+  const auto r = engine.exchange(a, /*wantCards=*/false);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(r.reviewsAcked, 2u);
+  EXPECT_EQ(statsRequests(http), 1u);
+
+  ankistats::Study s;
+  ankistats::loadStudy(fs, a.id, kNoon, s);
+  EXPECT_EQ(s.days, ankistats::Study::Days::Server);
+  EXPECT_EQ(s.reviewedToday, 3) << "2 counted by the server + 1 pending, each once";
+  EXPECT_EQ(s.pending, 1);
+  EXPECT_EQ(s.streak, 2);
+  EXPECT_EQ(s.syncedDaysAgo, 0);
+}
+
+TEST(AnkiSyncEngine, StatsRideWithEverySyncAndNeverFailIt) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, [] { return kNoon; });
+  const AnkiAccount a = testAccount();
+  http.responses["POST /v1/p/alice/exchange"] = {200, R"({"cards":[],"counts":{}})"};
+  http.responses["GET /v1/p/alice/decks"] = {200, R"({"decks":[]})"};
+  http.responses["GET /v1/p/alice/stats?days=371"] = {500, R"({"error":{"code":"internal","message":"boom"}})"};
+
+  auto r = engine.syncAccount(a, true);
+  EXPECT_TRUE(r.ok) << r.error;
+  EXPECT_TRUE(r.error.empty()) << r.error;
+  EXPECT_EQ(statsRequests(http), 1u) << "nothing acked: syncAccount fetches stats itself";
+  EXPECT_FALSE(fs.exists(ankipaths::statsFile(a.id)));
+
+  http.responses["GET /v1/p/alice/stats?days=371"] = {200, kStatsResponse};
+  r = engine.syncAccount(a, true);
+  EXPECT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(statsRequests(http), 2u);
+  auto h = std::make_unique<ankistats::History>();
+  ASSERT_TRUE(ankistats::loadHistory(fs, a.id, *h));
+  EXPECT_EQ(h->anchor.day, ankistats::parseIso("2026-11-10"));
+  EXPECT_EQ(h->counts[1], 4);
+
+  // A broken answer keeps the last good file.
+  http.responses["GET /v1/p/alice/stats?days=371"] = {200, R"({"reviewed_by_day":{"2026-11-10":9}})"};
+  EXPECT_FALSE(engine.fetchStats(a).ok);
+  ASSERT_TRUE(ankistats::loadHistory(fs, a.id, *h));
+  EXPECT_EQ(h->counts[0], 2);
 }
 
 // ---------------------------------------------------------------------------
@@ -817,4 +893,36 @@ TEST(AnkiConnectClient, NonReviewAccountOnlyPushes) {
   const AnkiSyncEngine::Result r = engine.exchange(a, false);
   EXPECT_TRUE(r.ok);
   EXPECT_TRUE(http.bodies.empty());
+}
+
+TEST(AnkiConnectClient, StatsFollowAnsweredCardsOnTheDeviceClock) {
+  const ScopedTz utc("UTC0");
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, [] { return kNoon; });
+  const AnkiAccount a = connectAccount();
+  AnkiJournal journal(fs, ankipaths::reviewsFile(a.id));
+  journal.append({"dev-1", 111, 3, 0});
+  journal.append({"dev-2", 112, 1, 0});
+  http.responses["answerCards"] = "{\"result\":[true,false],\"error\":null}";
+  http.responses["getNumCardsReviewedByDay"] =
+      "{\"result\":[[\"2026-11-10\",3],[\"2026-11-08\",1],[\"2019-01-01\",8]],\"error\":null}";
+
+  const auto r = engine.exchange(a, /*wantCards=*/false);
+  ASSERT_TRUE(r.ok) << r.error;
+  EXPECT_EQ(http.count("getNumCardsReviewedByDay"), 1u);
+  EXPECT_EQ(http.last("getNumCardsReviewedByDay"), "{\"action\":\"getNumCardsReviewedByDay\",\"version\":6}");
+  auto h = std::make_unique<ankistats::History>();
+  ASSERT_TRUE(ankistats::loadHistory(fs, a.id, *h));
+  EXPECT_EQ(h->anchor.day, ankistats::parseIso("2026-11-10"));
+  EXPECT_EQ(h->anchor.endsAt, 1794369600);  // next 04:00 local
+  EXPECT_EQ(h->counts[0], 3);
+  EXPECT_EQ(h->counts[2], 1);
+
+  // No clock: the day cannot be placed and the last file stays.
+  AnkiSyncEngine noClock(fs, http, nullptr);
+  http.responses["getNumCardsReviewedByDay"] = "{\"result\":[[\"2026-11-10\",9]],\"error\":null}";
+  EXPECT_FALSE(noClock.fetchStats(a).ok);
+  ASSERT_TRUE(ankistats::loadHistory(fs, a.id, *h));
+  EXPECT_EQ(h->counts[0], 3);
 }

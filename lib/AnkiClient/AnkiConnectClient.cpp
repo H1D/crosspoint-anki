@@ -8,6 +8,7 @@
 #include "AnkiJournal.h"
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
+#include "AnkiStats.h"
 #include "AnkiSyncEngine.h"
 #include "AnkiTypeAnswer.h"
 
@@ -526,6 +527,22 @@ AnkiSyncResult AnkiConnectClient::exchange(const AnkiAccount& account, const boo
   }
   r.ok = true;
   if (wantCards) fetchQueue(account, r);  // sets ok=false and error on failure
+  return r;
+}
+
+AnkiSyncResult AnkiConnectClient::fetchStats(const AnkiAccount& account) {
+  AnkiSyncResult r;
+  if (!ensureProfile(account, r)) return r;
+  // The whole collection's history, newest first; the parser keeps a window.
+  ankistats::StatsParser parser(ankistats::StatsParser::Format::AnkiConnect);
+  const Call c = call(account, "getNumCardsReviewedByDay", "", parser.callbacks());
+  if (!c.ok) {
+    fail(r, c);
+    return r;
+  }
+  r.httpStatus = c.status;
+  r.ok = ankistats::saveAnswer(fs, account.id, parser, clock ? clock() : 0);
+  if (!r.ok) r.error = "Stats not saved";
   return r;
 }
 
