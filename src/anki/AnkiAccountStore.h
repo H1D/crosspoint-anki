@@ -63,6 +63,10 @@ class AnkiAccountStore : public PersistableStore<AnkiAccountStore> {
   // Stores the ticked set (addTarget) and decks of one add with a single
   // save, skipped when nothing changed.
   bool recordAdd(const std::vector<AddChoice>& choices);
+  // Indexes of the enabled accounts add-word starts with ticked: the flagged
+  // ones, else the review account, else the first enabled one (none only when
+  // nothing is enabled).
+  std::vector<size_t> defaultAddTargets() const;
 
   // The last looked-up word the Send Words screen handled ("vocabDone" in
   // anki.json); absent until the first send.

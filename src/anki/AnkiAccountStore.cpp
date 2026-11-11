@@ -195,6 +195,22 @@ bool AnkiAccountStore::recordAdd(const std::vector<AddChoice>& choices) {
   return !changed || saveToFile();
 }
 
+std::vector<size_t> AnkiAccountStore::defaultAddTargets() const {
+  std::vector<size_t> ticked;
+  size_t pick = accounts.size();
+  const int reviewIdx = getReviewAccountIndex();
+  for (size_t i = 0; i < accounts.size(); i++) {
+    if (!accounts[i].enabled) continue;
+    if (accounts[i].addTarget) ticked.push_back(i);
+    if (pick == accounts.size() || static_cast<int>(i) == reviewIdx) pick = i;
+  }
+  // No flagged account (first use, or the flagged ones were disabled or
+  // removed): the review account, else the first enabled one, so Add never
+  // silently does nothing.
+  if (ticked.empty() && pick < accounts.size()) ticked.push_back(pick);
+  return ticked;
+}
+
 bool AnkiAccountStore::setVocabDone(const ankivocab::Marker& marker) {
   vocabDone = marker;
   return saveToFile();
