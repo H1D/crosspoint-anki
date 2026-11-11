@@ -1,9 +1,11 @@
 #pragma once
 
 #include <AnkiTypes.h>
+#include <AnkiVocabulary.h>
 #include <ArduinoJson.h>
 #include <PersistableStore.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -21,6 +23,7 @@ class AnkiAccountStore : public PersistableStore<AnkiAccountStore> {
   std::vector<AnkiAccount> accounts;
   uint32_t nextId = 1;
   uint32_t reviewAccountId = 0;  // 0 = none chosen
+  std::optional<ankivocab::Marker> vocabDone;
 
   AnkiAccountStore() = default;
   friend class PersistableStore<AnkiAccountStore>;
@@ -60,6 +63,11 @@ class AnkiAccountStore : public PersistableStore<AnkiAccountStore> {
   // Stores the ticked set (addTarget) and decks of one add with a single
   // save, skipped when nothing changed.
   bool recordAdd(const std::vector<AddChoice>& choices);
+
+  // The last looked-up word the Send Words screen handled ("vocabDone" in
+  // anki.json); absent until the first send.
+  const std::optional<ankivocab::Marker>& getVocabDone() const { return vocabDone; }
+  bool setVocabDone(const ankivocab::Marker& marker);
 
   // Remembers the deck last used by add-word for this account (saved).
   bool setLastDeck(size_t index, const std::string& deck);

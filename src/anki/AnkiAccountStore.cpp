@@ -19,6 +19,10 @@ std::string trimSlash(std::string url) {
 void AnkiAccountStore::toJson(JsonDocument& doc) const {
   doc["nextId"] = nextId;
   doc["reviewAccount"] = reviewAccountId;
+  if (vocabDone) {
+    doc["vocabDone"]["pos"] = vocabDone->pos;
+    doc["vocabDone"]["id"] = vocabDone->id;
+  }
   JsonArray arr = doc["accounts"].to<JsonArray>();
   for (const auto& a : accounts) {
     JsonObject obj = arr.add<JsonObject>();
@@ -42,6 +46,9 @@ bool AnkiAccountStore::fromJson(JsonVariantConst doc) {
   accounts.clear();
   nextId = doc["nextId"] | 1U;
   reviewAccountId = doc["reviewAccount"] | 0U;
+  vocabDone.reset();
+  const char* vocabId = doc["vocabDone"]["id"] | "";
+  if (vocabId[0]) vocabDone = ankivocab::Marker{doc["vocabDone"]["pos"] | 0U, vocabId};
   bool needsResave = false;
 
   JsonArrayConst arr = doc["accounts"].as<JsonArrayConst>();
@@ -186,6 +193,11 @@ bool AnkiAccountStore::recordAdd(const std::vector<AddChoice>& choices) {
     }
   }
   return !changed || saveToFile();
+}
+
+bool AnkiAccountStore::setVocabDone(const ankivocab::Marker& marker) {
+  vocabDone = marker;
+  return saveToFile();
 }
 
 bool AnkiAccountStore::setLastDeck(size_t index, const std::string& deck) {
