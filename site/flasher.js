@@ -9,7 +9,7 @@
  * never touched.
  *
  * esptool-js is loaded from a CDN as an ES module. crosspoint-tools ships a
- * vendored esbuild bundle of esptool-js; its readFlash()/after() bodies are
+ * vendored esbuild bundle of esptool-js; its after() body is
  * identical to the published 0.5.7 package, so the CDN build is used here.
  */
 
@@ -148,6 +148,7 @@ export async function validateFirmwareImage(data) {
 
 const OTA_SECTOR_BYTES = 0x1000;
 const OTADATA_BYTES = 2 * OTA_SECTOR_BYTES;
+const READ_BLOCK_BYTES = 256; // flash read block, one in flight (see readFlash)
 
 const OTA_STATE = { NEW: 0, PENDING_VERIFY: 1, VALID: 2, INVALID: 3, ABORTED: 4, UNDEFINED: 0xFFFFFFFF };
 const INVALID_STATES = new Set([OTA_STATE.INVALID, OTA_STATE.ABORTED]);
@@ -348,10 +349,37 @@ export class CrossPointFlasher {
     this.espLoader = null;
   }
 
+  // Replaces esptool-js readFlash(), which asks the stub for 4 KB blocks with
+  // 1 KB in flight. A USB-UART bridge (the Sticky's CH343) passes each block to
+  // the host as one burst, and Chrome on macOS keeps only the first ~600 bytes
+  // of a 4 KB burst. Small blocks with one in flight, as Python esptool reads,
+  // keep every burst short.
+  async readFlash(addr, size, onProgress) {
+    const esp = this.espLoader;
+    const args = new Uint8Array(16);
+    const view = new DataView(args.buffer);
+    [addr, size, READ_BLOCK_BYTES, READ_BLOCK_BYTES].forEach((v, i) => view.setUint32(i * 4, v, true));
+    await esp.checkCommand('read flash', esp.ESP_READ_FLASH, args);
+    const data = new Uint8Array(size);
+    let received = 0;
+    while (received < size) {
+      const { value: block } = await esp.transport.read(esp.DEFAULT_TIMEOUT).next();
+      if (!(block instanceof Uint8Array) || block.length === 0 || received + block.length > size) {
+        throw new Error(`Flash read at 0x${addr.toString(16)} failed after ${received} of ${size} bytes.`);
+      }
+      data.set(block, received);
+      received += block.length;
+      await esp.transport.write(esp._intToByteArray(received));
+      if (onProgress) onProgress(block, received, size);
+    }
+    await esp.transport.read(esp.DEFAULT_TIMEOUT).next(); // trailing MD5 packet
+    return data;
+  }
+
   async readLayout() {
     // The table is one 4 KB sector at 0x8000; parsing stops at the first
     // all-0xFF entry.
-    const data = await this.espLoader.readFlash(0x8000, 0x1000);
+    const data = await this.readFlash(0x8000, 0x1000);
     const partitions = parsePartitionTable(data);
     this.layout = extractLayout(partitions);
     return partitions;
@@ -388,7 +416,7 @@ export class CrossPointFlasher {
     step(1, 'done');
 
     step(2, 'running');
-    const otaRaw = await this.espLoader.readFlash(this.layout.otadataOffset, OTADATA_BYTES, (_, p, t) => {
+    const otaRaw = await this.readFlash(this.layout.otadataOffset, OTADATA_BYTES, (_, p, t) => {
       if (onProgress) onProgress('Read OTA data', p, t);
     });
     const ota = parseOtadata(otaRaw);
@@ -419,7 +447,7 @@ export class CrossPointFlasher {
       eraseAll: false, compress: true,
       reportProgress: (_, written, total) => { if (onProgress) onProgress('Update boot partition', written, total); },
     });
-    const verify = parseOtadata(await this.espLoader.readFlash(this.layout.otadataOffset, OTADATA_BYTES));
+    const verify = parseOtadata(await this.readFlash(this.layout.otadataOffset, OTADATA_BYTES));
     assertOtadataSwitch(verify, ota.inactiveApp, ota.newSeq);
     step(4, 'done');
 
