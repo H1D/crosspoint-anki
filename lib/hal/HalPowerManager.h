@@ -40,6 +40,9 @@ class HalPowerManager {
 
   // Setup wake up GPIO and enter deep sleep
   // Should be called inside main loop() to handle the currentLockMode
+  // wakeOnHeldButton: arm the wake without waiting for the power button's
+  // release, so a press that is still down wakes the device straight back up
+  // through the normal power-button wake path.
   //
   // timerWakeUs: optional one-shot deep-sleep timer wake in microseconds (the
   // ESP-IDF timer-wake contract). Zero arms nothing, keeping the
@@ -47,7 +50,15 @@ class HalPowerManager {
   // power button — whichever source fires first ends the sleep. Timer wake is
   // effective only where the ESP32 stays powered through sleep (USB power or
   // latched rails); a battery power-off or PMIC shutdown removes it.
-  void startDeepSleep(HalGPIO& gpio, uint64_t timerWakeUs = 0) const;
+  void startDeepSleep(HalGPIO& gpio, bool wakeOnHeldButton = false, uint64_t timerWakeUs = 0) const;
+
+#if FREEINK_DEVICE_PICCO
+  // While USB powers the device, light-sleep instead of deep sleep (deep sleep
+  // cannot observe the charger), calling onStatus whenever the charging state
+  // or percentage changes. Returns true when the power button ended the hold,
+  // false when USB went away or was never present.
+  bool holdWhileUsbPowered(HalGPIO& gpio, void (*onStatus)(bool charging, uint16_t percent)) const;
+#endif
 
   // Get battery percentage (range 0-100)
   uint16_t getBatteryPercentage() const;

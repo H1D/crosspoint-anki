@@ -67,6 +67,9 @@ installed for Hermes).
    vakantie: regio; school and school-sleep: kid and key, from
    `~/.hermes/secrets/crosspoint-school.env` on clawd).
 2. Connect the reader to WiFi once, then restart it so the plugin subscribes.
+   Plugins must be on (Settings → Connectivity → Plugins). A reader that
+   already had plugins on the card when it updated to 2.0.0 keeps them on; on
+   a fresh install the setting starts off.
 3. Put the reader to sleep. It joins WiFi (battery at least 20%), downloads the
    image, and sleeps.
 4. Open `/informers` in the file browser and pick an image. Left and Right flip
