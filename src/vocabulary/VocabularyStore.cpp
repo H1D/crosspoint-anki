@@ -24,6 +24,8 @@ constexpr size_t MAX_HTML_INPUT_BYTES = 4096;
 constexpr size_t MAX_HTML_SCAN_BYTES = 16 * 1024;
 constexpr size_t MAX_TITLE_BYTES = 256;
 constexpr size_t MAX_METADATA_BYTES = 160;
+constexpr size_t MAX_SENTENCE_BYTES = 512;
+constexpr size_t MAX_ANKI_BACK_BYTES = 600;
 
 // Buffered output avoids allocating a full JSON record on the X3.
 class RecordWriter {
@@ -328,6 +330,14 @@ bool VocabularyStore::append(const VocabularyContext& context, const std::string
     record.raw("null");
   } else {
     record.number(context.startOffset);
+  }
+  if (!context.sentence.empty()) {
+    record.raw(",\"sentence\":");
+    record.quoted(context.sentence, MAX_SENTENCE_BYTES);
+  }
+  if (!context.ankiBack.empty()) {
+    record.raw(",\"back\":");
+    record.quoted(context.ankiBack, MAX_ANKI_BACK_BYTES);
   }
   record.raw("}\n");
 

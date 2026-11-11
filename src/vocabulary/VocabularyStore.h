@@ -13,6 +13,10 @@ struct VocabularyContext {
   uint16_t page = 0;
   uint16_t spine = 0;
   uint32_t startOffset = UINT32_MAX;
+  // Fork: the Anki note's sentence and Back field, when the lookup could have
+  // been added to Anki, so a batch send makes the same card as Add to Anki.
+  std::string sentence;
+  std::string ankiBack;
 };
 
 class VocabularyStore {
