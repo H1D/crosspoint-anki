@@ -54,6 +54,7 @@
 #include "activities/network/WifiSelectionActivity.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "anki/AnkiAccountStore.h"
+#include "anki/AnkiVocabularyActivity.h"
 #include "clippings/ClippingText.h"
 #include "clippings/ClippingsManager.h"
 #include "components/UITheme.h"
@@ -1307,6 +1308,16 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::ANKI_ADD: {
       openAnkiWordSelect();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::ANKI_SEND_WORDS: {
+      auto vocabulary = makeUniqueNoThrow<AnkiVocabularyActivity>(renderer, mappedInput);
+      if (!vocabulary) {
+        LOG_ERR("ERS", "OOM: send words screen");
+        requestUpdate();
+        break;
+      }
+      startActivityForResult(std::move(vocabulary), [](const ActivityResult&) {});
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {

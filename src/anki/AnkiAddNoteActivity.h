@@ -39,6 +39,9 @@ class AnkiAddNoteActivity final : public UiListActivity {
   void onEnter() override;
   void render(RenderLock&&) override;
 
+  // Deck names for an account's row: the first is the deck new words go to.
+  static std::vector<std::string> deckChoices(const AnkiAccount& account);
+
  private:
   enum class Popup : uint8_t { None, Queued, Failed };
 
@@ -63,7 +66,6 @@ class AnkiAddNoteActivity final : public UiListActivity {
   void drawFooter() override;
 
   void buildTargets();
-  static std::vector<std::string> deckChoices(const AnkiAccount& account);
   void refreshRows();
   void cycleDeck(int direction);
   // Ticks the account (choosing a deck implies adding to it), then opens its deck list.

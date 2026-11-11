@@ -38,6 +38,7 @@ class AnkiSyncEngine {
   // dashboard reads again. Every caller (manual, exit and sleep syncs) gets
   // this; a failed fetch only undercounts until the next one.
   Result exchange(const AnkiAccount& account, bool wantCards);
+  // Queued add-word notes, AnkiNoteQueue::PUSH_CHUNK per request.
   Result pushNotes(const AnkiAccount& account);
   Result fetchDecks(const AnkiAccount& account);
   // Reviews per day -> stats.json. A failure leaves the old file.
@@ -56,6 +57,11 @@ class AnkiSyncEngine {
   // Seconds AnkiDo may spend on its inline AnkiWeb sync. Short: the device is
   // on battery and holds the radio up for the whole request.
   int syncTimeoutSeconds = 15;
+
+  // Asked before every chunk of queued notes (and between steps by callers
+  // that run on a time budget); true leaves the rest of the queue for the
+  // next sync. Empty: never stop.
+  std::function<bool()> shouldStop;
 
  private:
   Result exchangeAnkiDo(const AnkiAccount& account, bool wantCards);

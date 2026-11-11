@@ -31,7 +31,8 @@ class AnkiConnectClient {
   AnkiConnectClient(AnkiFs& fs, AnkiHttp& http, Clock clock) : fs(fs), http(http), clock(std::move(clock)) {}
 
   AnkiSyncResult exchange(const AnkiAccount& account, bool wantCards);
-  AnkiSyncResult pushNotes(const AnkiAccount& account);
+  // `shouldStop` is asked before every chunk of AnkiNoteQueue::PUSH_CHUNK notes.
+  AnkiSyncResult pushNotes(const AnkiAccount& account, const std::function<bool()>& shouldStop = {});
   AnkiSyncResult fetchDecks(const AnkiAccount& account);
   AnkiSyncResult fetchStats(const AnkiAccount& account);
 

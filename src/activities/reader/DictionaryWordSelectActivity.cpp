@@ -109,12 +109,16 @@ void DictionaryWordSelectActivity::performLookup() {
       popup = Popup::None;
       page.reset();
     }
+    AnkiNoteDraft draft;
+    if (note.anki) {
+      draft = noteDraft(&definition, headword);
+      vocabulary.sentence = draft.sentence;
+      vocabulary.ankiBack = draft.translation;
+    }
     if (SETTINGS.vocabularyHistoryEnabled &&
         !VocabularyStore::append(vocabulary, lookupText, headword, definition, dict.definitionsAreHtml())) {
       LOG_ERR("VOCAB", "Could not save successful dictionary lookup");
     }
-    AnkiNoteDraft draft;
-    if (note.anki) draft = noteDraft(&definition, headword);
     // WikDict entries read better as "gloss — translations" per sense than
     // laid out as delivered (nested lists, IPA the fonts cannot draw).
     if (dict.definitionsAreHtml()) {

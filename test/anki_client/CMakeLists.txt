@@ -1,8 +1,10 @@
 add_executable(AnkiClientTest
   AnkiClientTest.cpp
   AnkiNoteFrontTest.cpp
+  AnkiPushChunksTest.cpp
   AnkiTypeAnswerTest.cpp
   AnkiStatsTest.cpp
+  AnkiVocabularyTest.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiJson.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiMarkup.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiJournal.cpp
@@ -13,6 +15,7 @@ add_executable(AnkiClientTest
   ${REPO_ROOT}/lib/AnkiClient/AnkiHtml.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiTypeAnswer.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiStats.cpp
+  ${REPO_ROOT}/lib/AnkiClient/AnkiVocabulary.cpp
 )
 
 target_include_directories(AnkiClientTest PRIVATE

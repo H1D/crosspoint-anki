@@ -71,6 +71,7 @@ std::vector<std::string> AnkiAddNoteActivity::deckChoices(const AnkiAccount& acc
 void AnkiAddNoteActivity::buildTargets() {
   targets.clear();
   const auto& accounts = ANKI_STORE.getAccounts();
+  const std::vector<size_t> ticked = ANKI_STORE.defaultAddTargets();
   targets.reserve(accounts.size());
   for (size_t i = 0; i < accounts.size(); i++) {
     const AnkiAccount& a = accounts[i];
@@ -81,21 +82,8 @@ void AnkiAddNoteActivity::buildTargets() {
     t.label = a.name.empty() ? a.url : a.name;
     t.decks = deckChoices(a);
     t.deckPos = 0;
-    t.checked = a.addTarget;
+    t.checked = std::find(ticked.begin(), ticked.end(), i) != ticked.end();
     targets.push_back(std::move(t));
-  }
-  if (targets.empty()) return;
-
-  // No enabled account flagged (first use, or the flagged ones were disabled
-  // or removed): the review account, else the first enabled one, so Add never
-  // silently does nothing.
-  if (!anyChecked()) {
-    const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
-    Target* pick = &targets.front();
-    for (Target& t : targets) {
-      if (static_cast<int>(t.storeIndex) == reviewIdx) pick = &t;
-    }
-    pick->checked = true;
   }
 }
 

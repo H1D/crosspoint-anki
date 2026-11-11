@@ -243,7 +243,8 @@ whole afterwards.
   the sync screen shows the same "rejected" hint as an AnkiDo 401.
 - **Sleep-entry sync** works unchanged: `exchange(wantCards=false)` is one
   `answerCards` request (plus `loadProfile` when a profile is set) and
-  `pushNotes` is one request per note, all under the same 4 s HTTP timeout.
+  `pushNotes` is one request per note, all under the same 4 s HTTP timeout
+  (in chunks of ten since 2026-11-11, see the last section).
 - **Add-word modal is a checklist (2026-09-28).** One toggle row per enabled
   account (subtitle: the deck this add goes to, Left/Right changes it for
   this add only) and an "Add" row; the note is queued once per checked
@@ -473,3 +474,117 @@ whole afterwards.
   irregular verbs put the infinitive's entries first and the form's own
   after, through the same list. WikDict's compact view still drops the
   labels.
+
+## Send looked-up words (2026-11-11)
+
+- **Which words.** The ones in upstream's `/Vocabulary.txt`, which every
+  successful dictionary lookup appends to while Settings > Reader > Save
+  Vocabulary Lookups is on, since the last send. The screen reads that file and
+  keeps no list of its own. With the setting off nothing is recorded, and the
+  empty screen says where to turn it on.
+- **Two extra record keys.** A record holds the dictionary's definition (plain
+  text, 2 KiB), not the sentence or the short translation Add to Anki would
+  have used, so a batch card would have been poorer than a single one. When the
+  lookup could also have been an add-word (an account is enabled, or it came
+  from Add to Anki), `DictionaryWordSelectActivity::performLookup` builds the
+  note draft first and the record gets `"sentence"` (at most 512 bytes) and
+  `"back"` (at most 600) after `start_offset`. Older records, or lookups made
+  with no account, have neither: no sentence, and Back is the definition with
+  whitespace collapsed and cut at 600 bytes on a UTF-8 boundary. The upstream
+  file diff is the two fields in `VocabularyContext` and the write.
+- **The "already sent" marker.** `anki.json` has `"vocabDone": {"pos", "id"}`,
+  the byte offset where the last handled record starts and its id. A scan seeks
+  there, checks the id and starts after that record. If the id differs (the
+  file was replaced or deleted) it starts at 0. Not the file's size or time and
+  not removing lines: the file is upstream's and may be exported or cleared,
+  and rewriting a file of several MB on an ESP32 is the wrong cost. Send moves
+  the marker to the last record of the window even when nothing is ticked, so
+  unticked words are dismissed. A word looked up again later is a new row.
+- **Rows.** One row per distinct word, the first record wins. The key is the
+  dictionary form (the word when there is none), cleaned of punctuation and
+  lowercased (ASCII, Latin-1 and basic Cyrillic), so "Walked", "walked," and
+  "walks" (headword walk) are one row. At most 100 rows per window; the rest
+  show on the next open. RAM holds a label and a one-byte tick mask per row;
+  Send walks the file again for the details, so 100 definitions are never in
+  memory. A line over 16 KiB is skipped (an escaped newline is six bytes, so a
+  2 KiB definition can pass 4 KiB).
+- **The card is the single-word card.** Front from `ankinote::frontHtml` with the
+  cleaned word and the dictionary form when it differs (the single-word rule:
+  ASCII case does not count, so "VAN" for "van" has no separate form), Back as
+  above, tags
+  `crosspoint` and `book:<title>`, the account's model. The logic lives in
+  `lib/AnkiClient/AnkiVocabulary.*` with host tests (parser, row key, fields,
+  window and marker).
+- **Table.** Rows are words, columns the enabled accounts, a checkbox in each
+  cell drawn like a list toggle. A column is as wide as an eight-letter name and
+  the box; the word column keeps at least two fifths of the width. When the
+  accounts do not fit, the window of columns follows the cursor (and swipes
+  left and right) and two small arrows in the corner say more exist. Rows
+  scroll with swipes, and a held Up/Down pages. Side buttons move between rows
+  (header row, words, Send), front Left/Right between columns, Confirm toggles
+  the cell, a whole column on the header row (clears it when full, else fills
+  it), or sends. Taps: a cell, a column header, Send. Not a `UiListActivity`:
+  one FreeInkApp holds 24 interactions and a table has hundreds of cells, so it
+  is a plain `Activity` with its own hit test, like the dashboard.
+- **Defaults and decks.** A column starts ticked by Add to Anki's rule (flagged
+  accounts, else the review account, else the first enabled one;
+  `AnkiAccountStore::defaultAddTargets`, now shared). The table never changes
+  `addTarget`: sending a day of words says nothing about where single adds go.
+  Each account's notes go to the deck Add to Anki would preselect
+  (`AnkiAddNoteActivity::deckChoices`, first entry). No deck choice per cell.
+- **Entry.** Reader menu item right after Add to Anki, shown on the same
+  condition (an enabled account). Not on the Anki dashboard: the words come
+  from reading, and the dashboard is per account.
+- **No sync.** Send only queues notes (`notes.jsonl`); the sleep-entry and Anki
+  app syncs deliver them. A failed append stops Send, shows the failure and
+  leaves the marker; see "Queued cells" below for how a retry goes.
+
+## Chunked note push and a retryable Send (2026-11-11)
+
+- **Ten notes per request.** A sync used to load every queued note, build one
+  body from them and load the queue again to drop the acked ones. A note is
+  about 1.3 KB, so 100 queued words peaked at several hundred KB on a 380 KB
+  device. `AnkiNoteQueue::drain` now reads at most `PUSH_CHUNK` (10) notes,
+  hands them to the backend, rewrites the queue, and reads the next ten. Both
+  backends use it: AnkiDo sends one `POST /notes` per chunk, AnkiConnect one
+  `addNote` per note inside the chunk. A chunk is about 13 KB of notes and the
+  same again as request body.
+- **The queue is rewritten per chunk, line by line.** `removeAcked` copies the
+  lines that stay into `notes.jsonl.tmp` and renames it over the queue, so it
+  never holds the file. If a read or a write fails it removes the temp file and
+  leaves the queue as it was; a read error is not taken for the end of the
+  file. A failed rewrite ends the push with "SD write failed" instead of
+  sending the same chunk again.
+- **When the loop stops.** The queue is empty; a request failed (transport or
+  auth: the unsent notes stay); the time budget is spent; or a chunk acked
+  nothing, so a note the server keeps refusing costs one request, not one per
+  chunk. Notes refused in a chunk stay queued and are skipped for the rest of
+  the call, so ten refused notes do not hide the ones behind them.
+  `notesSent` counts notes offered to the server and `notesAcked` those it
+  finished with, summed over the chunks.
+- **Time budget.** The sleep-entry sync (15 s, `main.cpp`) checked it between
+  steps only. `AnkiSyncEngine::shouldStop` is now also asked before every chunk
+  and ends the push with the rest left for the next sync. The Anki app's
+  manual sync sets none.
+- **Queued cells.** The table keeps, per cell, a bit that says a note was
+  queued in this screen's lifetime (RAM only). Send skips such cells, and they
+  draw as checked and cannot be unticked (Confirm or a tap does nothing; a
+  column toggle leaves them alone). The marker moves only when every ticked
+  cell is queued, so after a failure Send can be pressed again without queuing
+  a word twice. Leaving the screen forgets the bits; the words not marked done
+  show again, as before.
+- **A failed marker save is a failed send.** The "Could not queue the note"
+  popup shows and the screen stays open. The retry has nothing left to queue
+  and only saves the marker again.
+- **Send's second pass checks the file.** `forEachRow` returns true only if it
+  read without error, produced exactly the scanned number of rows and ended on
+  the record the window ends on (same offset, same id). A file that changed
+  between the scan and Send, or a read that failed, is a failed send and the
+  marker stays.
+- **Client ids and the busy popup.** A send reserves its ids with
+  `ankidevice::reserveClientIds(n)`, one counter write, not one per note (a
+  batch can be 800). It shows the existing "Loading" popup and paints it before
+  the blocking pass; no new string, so no translation work.
+- **Touch.** After a swipe the cursor moves to the nearest visible row and
+  column, so Confirm never acts on a cell that is off screen. A tap is Send
+  only inside the drawn button.

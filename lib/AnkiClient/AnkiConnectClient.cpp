@@ -571,68 +571,74 @@ std::pair<std::string, std::string> AnkiConnectClient::fieldNames(const AnkiAcco
   return names;
 }
 
-AnkiSyncResult AnkiConnectClient::pushNotes(const AnkiAccount& account) {
+AnkiSyncResult AnkiConnectClient::pushNotes(const AnkiAccount& account, const std::function<bool()>& shouldStop) {
   AnkiSyncResult r;
   AnkiNoteQueue queue(fs, ankipaths::notesFile(account.id));
-  const std::vector<AnkiNoteQueue::Note> notes = queue.load();
-  r.notesSent = notes.size();
-  if (notes.empty()) {
+  if (queue.empty()) {
     r.ok = true;
     return r;
   }
   if (!ensureProfile(account, r)) return r;
-
-  std::vector<std::string> acked;
-  acked.reserve(notes.size());
-  std::string firstError;
-  bool failed = false;
-  Call last;
-  for (const AnkiNoteQueue::Note& n : notes) {
-    const std::pair<std::string, std::string> fields = fieldNames(account, n.model);
-    std::string params = "{\"note\":{\"deckName\":";
-    ankijson::appendQuoted(params, n.deck);
-    params += ",\"modelName\":";
-    ankijson::appendQuoted(params, n.model);
-    params += ",\"fields\":{";
-    ankijson::appendQuoted(params, fields.first);
-    params.push_back(':');
-    ankijson::appendQuoted(params, n.front);
-    params.push_back(',');
-    ankijson::appendQuoted(params, fields.second);
-    params.push_back(':');
-    ankijson::appendQuoted(params, n.back);
-    params += "},\"tags\":[";
-    for (size_t t = 0; t < n.tags.size(); t++) {
-      if (t) params.push_back(',');
-      ankijson::appendQuoted(params, n.tags[t]);
-    }
-    params += "],\"options\":{\"allowDuplicate\":false,\"duplicateScope\":\"deck\"}}}";
-
-    const Call c = call(account, "addNote", params, ankijson::Reader::Callbacks{});
-    if (c.ok) {
-      acked.push_back(n.clientId);
-      continue;
-    }
-    if (c.status < 200 || c.status >= 300 || containsNoCase(c.error, "api key")) {
-      failed = true;  // transport or auth: stop, keep the rest queued
-      last = c;
-      break;
-    }
-    // Duplicates and empty notes are refused for good; a missing deck or note
-    // type waits for a settings fix (the note stays queued, the text is shown).
-    if (containsNoCase(c.error, "duplicate") || containsNoCase(c.error, "empty")) {
-      acked.push_back(n.clientId);
-      continue;
-    }
-    if (firstError.empty()) firstError = c.error;
-  }
-  if (!acked.empty()) queue.removeAcked(acked);
-  r.notesAcked = acked.size();
-  if (failed) {
-    fail(r, last);
-    return r;
-  }
   r.ok = true;
-  r.error = firstError;  // informational
+
+  std::string firstError;
+  Call last;
+  const auto pushChunk = [&](const std::vector<AnkiNoteQueue::Note>& chunk, std::vector<std::string>& acked) {
+    for (const AnkiNoteQueue::Note& n : chunk) {
+      const std::pair<std::string, std::string> fields = fieldNames(account, n.model);
+      std::string params = "{\"note\":{\"deckName\":";
+      ankijson::appendQuoted(params, n.deck);
+      params += ",\"modelName\":";
+      ankijson::appendQuoted(params, n.model);
+      params += ",\"fields\":{";
+      ankijson::appendQuoted(params, fields.first);
+      params.push_back(':');
+      ankijson::appendQuoted(params, n.front);
+      params.push_back(',');
+      ankijson::appendQuoted(params, fields.second);
+      params.push_back(':');
+      ankijson::appendQuoted(params, n.back);
+      params += "},\"tags\":[";
+      for (size_t t = 0; t < n.tags.size(); t++) {
+        if (t) params.push_back(',');
+        ankijson::appendQuoted(params, n.tags[t]);
+      }
+      params += "],\"options\":{\"allowDuplicate\":false,\"duplicateScope\":\"deck\"}}}";
+
+      const Call c = call(account, "addNote", params, ankijson::Reader::Callbacks{});
+      if (c.ok) {
+        acked.push_back(n.clientId);
+        continue;
+      }
+      if (c.status < 200 || c.status >= 300 || containsNoCase(c.error, "api key")) {
+        last = c;  // transport or auth: stop, keep the rest queued
+        return false;
+      }
+      // Duplicates and empty notes are refused for good; a missing deck or note
+      // type waits for a settings fix (the note stays queued, the text is shown).
+      if (containsNoCase(c.error, "duplicate") || containsNoCase(c.error, "empty")) {
+        acked.push_back(n.clientId);
+        continue;
+      }
+      if (firstError.empty()) firstError = c.error;
+    }
+    return true;
+  };
+
+  const AnkiNoteQueue::Drain d = queue.drain(shouldStop, pushChunk);
+  r.notesSent = d.sent;
+  r.notesAcked = d.acked;
+  switch (d.end) {
+    case AnkiNoteQueue::Drain::End::Failed:
+      fail(r, last);
+      break;
+    case AnkiNoteQueue::Drain::End::SaveFailed:
+      r.ok = false;
+      r.error = "SD write failed";
+      break;
+    default:
+      r.error = firstError;  // informational
+      break;
+  }
   return r;
 }

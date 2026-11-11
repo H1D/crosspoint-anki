@@ -49,12 +49,17 @@ const std::string& deviceId() {
   return id;
 }
 
-std::string nextClientId() {
+uint32_t reserveClientIds(const uint32_t count) {
   loadCounter();
-  counter++;
+  const uint32_t first = counter + 1;
+  counter += count;
   saveCounter();
-  return deviceId() + "-" + std::to_string(counter);
+  return first;
 }
+
+std::string clientId(const uint32_t counterValue) { return deviceId() + "-" + std::to_string(counterValue); }
+
+std::string nextClientId() { return clientId(reserveClientIds(1)); }
 
 int64_t nowEpoch() {
   struct tm local{};

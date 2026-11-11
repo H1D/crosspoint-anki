@@ -79,6 +79,7 @@ class AnkiLineReader {
     for (;;) {
       if (pos >= fill) {
         const int n = file.read(buf, sizeof(buf));
+        if (n < 0) readFailed = true;
         if (n <= 0) return !line.empty();
         fill = static_cast<size_t>(n);
         pos = 0;
@@ -91,9 +92,13 @@ class AnkiLineReader {
     }
   }
 
+  // True once a read returned an error: a following EOF is not the real end.
+  bool failed() const { return readFailed; }
+
  private:
   AnkiFile& file;
   char buf[256] = {};
   size_t pos = 0;
   size_t fill = 0;
+  bool readFailed = false;
 };

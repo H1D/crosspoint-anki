@@ -92,6 +92,7 @@ void EpubReaderMenuActivity::buildMenuItems(std::vector<MenuItem>& items, const 
   }
   if (ANKI_STORE.hasEnabledAccounts()) {
     items.push_back({MenuAction::ANKI_ADD, StrId::STR_ANKI_ADD_TO_ANKI});
+    items.push_back({MenuAction::ANKI_SEND_WORDS, StrId::STR_ANKI_SEND_WORDS});
   }
   items.push_back({MenuAction::ROTATE_SCREEN, StrId::STR_ORIENTATION});
   items.push_back({MenuAction::AUTO_PAGE_TURN, StrId::STR_AUTO_TURN_PAGES_PER_MIN});
