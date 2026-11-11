@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <HalStorage.h>
+#include <LibraryBuilder.h>
 #include <Logging.h>
 #include <TrustedTime.h>
 #include <esp_random.h>
@@ -50,6 +51,9 @@ struct Subscriber {
   uint8_t wakeCount = 0;
   int16_t wakeMinutes[MAX_WAKE_TIMES] = {0};  // sleep.enter "wake" times, minutes after local midnight
   uint16_t refreshMinutes = 0;                // sleep.enter "refresh_minutes"; 0 = every sleep
+  // Hash of each handler's "require_meta" key, 0 = unfiltered. A hash keeps
+  // emit() free of manifest reads; a collision only queues an extra event.
+  uint32_t metaKeyHash[static_cast<size_t>(pluginevents::Event::COUNT)] = {};
 };
 Subscriber subscribers[MAX_EVENT_PLUGINS];
 
@@ -100,6 +104,19 @@ void noteRefreshed(const Subscriber& sub) {
   }
 }
 
+// FNV-1a, never 0 (0 marks an unfiltered handler).
+uint32_t metaKeyHash(const char* key) {
+  uint32_t hash = 2166136261u;
+  for (; *key; key++) hash = (hash ^ static_cast<uint8_t>(*key)) * 16777619u;
+  return hash == 0 ? 1 : hash;
+}
+
+// The book an event is about: "book", or "path" for book.downloaded.
+const char* eventBook(JsonVariantConst vars) {
+  const char* book = vars["book"] | "";
+  return book[0] != '\0' ? book : (vars["path"] | "");
+}
+
 }  // namespace
 
 namespace pluginevents {
@@ -133,14 +150,23 @@ void refreshSubscriptions() {
     uint8_t wakeCount = 0;
     int16_t wakeMinutes[MAX_WAKE_TIMES] = {0};
     uint16_t refreshMinutes = 0;
+    uint32_t metaHashes[static_cast<size_t>(Event::COUNT)] = {};
     for (JsonPairConst kv : doc["events"].as<JsonObjectConst>()) {
       const int e = eventFromName(kv.key().c_str());
       if (e < 0) {
         LOG_DBG("PEVT", "%s: unknown event '%s' ignored", entry.name.c_str(), kv.key().c_str());
         continue;
       }
+      // A filter that is not a string must not fall back to "every book".
+      JsonVariantConst requireMeta = kv.value()["require_meta"];
+      if (!requireMeta.isNull() && !requireMeta.is<const char*>()) {
+        LOG_ERR("PEVT", "%s: %s require_meta is not a string; handler ignored", entry.name.c_str(), kv.key().c_str());
+        continue;
+      }
       mask |= static_cast<uint8_t>(1u << e);
       if (kv.value()["connect"] | false) connectMask |= static_cast<uint8_t>(1u << e);
+      const char* requiredMeta = requireMeta | "";
+      if (requiredMeta[0] != '\0') metaHashes[e] = metaKeyHash(requiredMeta);
       if (e != static_cast<int>(Event::SleepEnter)) continue;
       const unsigned minutes = kv.value()["refresh_minutes"] | 0u;
       refreshMinutes = static_cast<uint16_t>(minutes < MAX_REFRESH_MINUTES ? minutes : MAX_REFRESH_MINUTES);
@@ -168,6 +194,7 @@ void refreshSubscriptions() {
     sub.wakeCount = wakeCount;
     memcpy(sub.wakeMinutes, wakeMinutes, sizeof(wakeMinutes));
     sub.refreshMinutes = refreshMinutes;
+    memcpy(sub.metaKeyHash, metaHashes, sizeof(metaHashes));
     LOG_DBG("PEVT", "%s subscribes mask=0x%02x", sub.name, sub.mask);
   }
 }
@@ -241,6 +268,9 @@ void emit(const Event e, const Var* vars, const size_t varCount, const bool sche
     return;
   }
 
+  // The book's sidecar, read once and shared by every filtered handler.
+  pluginhttp::Headers meta;
+  bool metaLoaded = false;
   for (const auto& sub : subscribers) {
     if (sub.name[0] == '\0' || !(sub.mask & eventBit(e))) continue;
     // A plain sleep skips a plugin refreshed within its interval: nothing is
@@ -248,6 +278,24 @@ void emit(const Event e, const Var* vars, const size_t varCount, const bool sche
     if (e == Event::SleepEnter && !scheduled && refreshedRecently(sub)) {
       LOG_DBG("PEVT", "%s: refreshed recently, skipped", sub.name);
       continue;
+    }
+    const uint32_t wanted = sub.metaKeyHash[static_cast<size_t>(e)];
+    if (wanted != 0) {
+      // Filtered at queue time, so other books' events take no outbox space
+      // and never make the sleep path bring WiFi up.
+      if (!metaLoaded) {
+        const char* book = eventBook(doc["vars"]);
+        if (book[0] != '\0') pluginhttp::loadConfigFile(std::string(book) + ".meta.json", meta);
+        metaLoaded = true;
+      }
+      bool matched = false;
+      for (const auto& kv : meta) {
+        if (!kv.second.empty() && metaKeyHash(kv.first.c_str()) == wanted) {
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) continue;
     }
     const std::string path = outboxPath(sub);
     // A refresh plugin's images do not depend on the event: one pending
@@ -408,7 +456,7 @@ bool deliverLine(const DrainManifest& mf, const std::string& lineText, std::stri
   // flat fields written at download time) as {meta.*} variables, e.g. a
   // service book id for a sync handler.
   pluginhttp::Headers meta;
-  const char* book = vars["book"] | "";
+  const char* book = eventBook(vars);
   if (book[0] != '\0') {
     pluginhttp::loadConfigFile(std::string(book) + ".meta.json", meta);
     for (auto& kv : meta) kv.first = "{meta." + kv.first + "}";
@@ -467,6 +515,7 @@ bool deliverToHandler(const DrainManifest& mf, const DrainManifest::Handler* han
           return -1;
         }
         Storage.remove(bak.c_str());
+        if (library::isLibraryBookFile(dest)) library::markLibraryIndexDirty();
       } else {
         Storage.remove(tmp.c_str());
       }

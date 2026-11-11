@@ -22,9 +22,13 @@ bool load(const std::string& path, CrossPointSettings::ReaderFont& font) {
   const uint8_t pointSize = doc["size"] | static_cast<uint8_t>(0);
   if (pointSize == 0) return false;
   font = CrossPointSettings::ReaderFont();
-  font.family = doc["family"] | static_cast<uint8_t>(CrossPointSettings::NOTOSERIF);
   font.pointSize = pointSize;
   strncpy(font.sdFamilyName, doc["sd"] | "", sizeof(font.sdFamilyName) - 1);
+  // Built-in Noto Serif moved to the SD card; files from before name it by its old built-in ID.
+  if (font.sdFamilyName[0] == '\0' &&
+      (doc["family"] | CrossPointSettings::STORED_NOTOSANS) == CrossPointSettings::LEGACY_NOTOSERIF) {
+    strncpy(font.sdFamilyName, "NotoSerif", sizeof(font.sdFamilyName) - 1);
+  }
   return true;
 }
 
@@ -58,7 +62,7 @@ void BookFont::remember() {
     return;
   }
   JsonDocument doc;
-  doc["family"] = font.family;
+  doc["family"] = CrossPointSettings::STORED_NOTOSANS;
   doc["size"] = font.pointSize;
   if (font.sdFamilyName[0] != '\0') doc["sd"] = font.sdFamilyName;
   if (!PersistableStoreBase::writeDocToFile(fontPath.c_str(), doc)) {

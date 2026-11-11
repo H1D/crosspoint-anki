@@ -25,6 +25,9 @@ class GfxRenderer;
 // A handler is either a "request" (response discarded; an acknowledgement) or
 // a "download" (response streamed to `dest` on SD, e.g. a sleep image). A
 // download may be a list of up to four {url, dest} pairs.
+// "require_meta": "<key>" queues an event for that handler only when the
+// event's book ("book", or "path" for book.downloaded) has a sidecar with a
+// non-empty value for the key.
 //
 // Execution is deferred: plugin handlers need the network, and events mostly
 // fire with WiFi down (leaving the reader, entering sleep). emit() appends one
@@ -46,10 +49,10 @@ namespace pluginevents {
 
 enum class Event : uint8_t {
   ReaderOpen,      // "reader.open"      vars: book
-  ReaderExit,      // "reader.exit"      vars: book, percent
+  ReaderExit,      // "reader.exit"      vars: book, percent, end_percent
   ReaderSession,   // "reader.session"   vars: book, document, active-session summary
   BookDownloaded,  // "book.downloaded"  vars: path, title, plugin
-  SleepEnter,      // "sleep.enter"      vars: book, percent when sleeping from a reader, else none
+  SleepEnter,      // "sleep.enter"      vars: book, percent, end_percent when sleeping from a reader, else none
   COUNT
 };
 

@@ -1,15 +1,19 @@
 #pragma once
 
 #include <Epub/Page.h>
+#include <I18n.h>
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "ClipSelectionActivity.h"
 #include "activities/Activity.h"
 #include "anki/AnkiAddNoteActivity.h"
 #include "util/ButtonNavigator.h"
+#include "util/Dictionary.h"
 
 // Paged viewer for one dictionary definition. HTML definitions are laid out
 // through the EPUB chapter parser into styled Pages; anything else (plain
@@ -17,18 +21,19 @@
 // page renders spans of the original string, so no per-line copies are held.
 //
 // Given a note draft (an Anki account is enabled), an "Add to Anki" button
-// under the text (Confirm on button boards) opens AnkiAddNoteActivity; the
-// result is cancelled unless a note was queued.
+// under the first definition (Confirm on button boards; holding Confirm then
+// selects words) opens AnkiAddNoteActivity. A queued note closes the lookup.
 class DictionaryDefinitionActivity final : public Activity {
  public:
   explicit DictionaryDefinitionActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string headword,
                                         std::string definition, bool htmlDefinition = false,
                                         AnkiNoteDraft ankiDraft = {})
       : Activity("DictionaryDefinition", renderer, mappedInput),
-        headword(std::move(headword)),
-        definition(std::move(definition)),
+        content{.headword = std::move(headword), .text = std::move(definition)},
         htmlDefinition(htmlDefinition),
         ankiDraft(std::move(ankiDraft)) {}
+
+  bool enableLookup(Dictionary& dictionary, std::string&& query);
 
   void onEnter() override;
   void onExit() override;
@@ -38,17 +43,16 @@ class DictionaryDefinitionActivity final : public Activity {
  private:
   // One wrapped display line: a byte span of `definition`. Wrapping keeps
   // lines under the screen width, so uint16_t length is ample.
+  struct PlainSelectionLine;
+
   struct Line {
     uint32_t start;
     uint16_t len;
+    bool bold;
   };
 
   // Usable body-text area between the header and the button hints.
   struct BodyArea {
-    int width;
-    int height;
-  };
-  struct ButtonRect {
     int x;
     int y;
     int width;
@@ -56,30 +60,75 @@ class DictionaryDefinitionActivity final : public Activity {
   };
 
   BodyArea bodyArea() const;
-  bool offersAnkiAdd() const { return !ankiDraft.word.empty(); }
-  // The "Add to Anki" button, bottom of the content area above the hints.
-  ButtonRect addButtonRect() const;
+  // The add band stays reserved under nested definitions too, so going back
+  // lays the first one out exactly as before.
+  bool hasAnkiBand() const { return !ankiDraft.word.empty(); }
+  // The draft is the looked-up word's: offered on the first definition only.
+  bool offersAnkiAdd() const { return hasAnkiBand() && (!lookup || lookup->depth == 0); }
+  // The "Add to Anki" button, under the body above the hints.
+  BodyArea addButtonRect() const;
   void openAnkiAdd();
-  bool layoutHtmlPages();
-  void wrapText();
-  int measureSpan(int fontId, const char* text, size_t len) const;
-  void drawBody(int fontId, int x, int startY) const;
 
-  const std::string headword;
-  // Not const: onEnter() normalizes embedded NULs (StarDict multi-type
-  // separators) to newlines so C-string APIs see the whole text.
-  std::string definition;
+  struct Definition {
+    std::string headword;
+    std::string text;
+    std::vector<std::unique_ptr<Page>> pages;
+    std::vector<Line> lines;
+    int currentPage = 0;
+    int totalPages = 1;
+    int linesPerPage = 1;
+    int selectionPage = 0;
+    ClipSelectionActivity::Selection selection;
+
+    void releasePayload() {
+      std::string{}.swap(text);
+      std::vector<std::unique_ptr<Page>>{}.swap(pages);
+      std::vector<Line>{}.swap(lines);
+    }
+  };
+
+  // Replay the original query: the displayed headword may be a stem or synonym.
+  struct HistoryEntry {
+    std::string query;
+    int page = 0;
+    int selectionPage = 0;
+    ClipSelectionActivity::Selection selection;
+    bool styled = false;
+  };
+
+  struct LookupState {
+    explicit LookupState(Dictionary& dictionary) : dictionary(dictionary) {}
+    Dictionary& dictionary;  // Owned by the retained DictionaryWordSelectActivity parent.
+    std::array<HistoryEntry, 16> history;
+    size_t depth = 0;
+    std::string query;
+    std::string pendingWord;
+    std::vector<std::unique_ptr<Page>> selectionPages;
+  };
+
+  bool prepareDefinition(Definition& next, bool forcePlain = false);
+  bool layoutHtmlPages(Definition& next);
+  bool wrapText(Definition& next);
+  bool prepareFont(std::string& definition, int fontId);
+  bool reserveLines(Definition& next, size_t count);
+  int measureSpan(int fontId, const char* text, size_t len, EpdFontFamily::Style family = EpdFontFamily::REGULAR) const;
+  void drawBody(int fontId, int x, int startY, int currentPage) const;
+  void startSelection(int x = -1, int y = -1);
+  bool buildPlainSelectionPages();
+  void navigateDefinition(bool back);
+  bool restoreCurrentDefinition(bool styled);
+  void showMessage(StrId message);
+
+  Definition content;
   const bool htmlDefinition;
   AnkiNoteDraft ankiDraft;
   // Confirm went down on this screen: a release left over from the word
   // picker (pressed during a slow lookup) must not open the add screen.
   bool confirmPressedHere = false;
-  // Styled path: reader-identical Pages laid out from the HTML definition.
-  // Empty means the plain-text span path below is active.
-  std::vector<std::unique_ptr<Page>> pages;
-  std::vector<Line> lines;
-  int currentPage = 0;
-  int totalPages = 1;
-  int linesPerPage = 1;
+  std::unique_ptr<LookupState> lookup;
+  StrId message = StrId::STR_DICT_NOT_FOUND;
+  unsigned long messageTime = 0;
+  bool messageVisible = false;
+  bool initialLayoutFailed = false;
   ButtonNavigator buttonNavigator;
 };

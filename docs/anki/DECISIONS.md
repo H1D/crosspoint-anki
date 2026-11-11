@@ -443,3 +443,33 @@ whole afterwards.
 - **Portrait in practice.** The dashboard lays itself out for any
   orientation, but only the reader applies the reading orientation, and it
   resets to portrait on exit, so the Anki screens open in portrait.
+
+## Upstream 2.0.0 (2026-11-11)
+
+- **Fork enum values come after upstream's.** Upstream took the persisted
+  slots the fork used: long-press 5 is now Save Clipping, Home button action
+  11 is Create Clipping. The Anki actions moved to the end (long-press 7,
+  Home button 12) so a settings file from stock CrossPoint keeps its meaning.
+  `CrossPointSettings::fromJson` moves the old fork values when the file has
+  no `pluginsEnabled` key, which every 2.0.0 save writes.
+- **Add to Anki rides on upstream's word selection.** Upstream replaced the
+  one-word picker with `ClipSelectionActivity` (ranges, touch handles, an
+  action bar) and turned `DictionaryWordSelectActivity` into the lookup
+  controller. The fork adds `ClipSelectionActivity::Mode::AnkiAdd` (reader
+  menu, long-press setting, Home button) and an Add to Anki button in the
+  touch action bar; the sentence for the note comes from the selection's
+  paragraph (`paragraphStart`), no longer from a row-gap guess. Touch
+  long-press now opens upstream's selection instead of going straight to Anki:
+  one more tap, and highlights keep working.
+- **Confirm in the definition still adds to Anki.** Upstream gave Confirm to
+  selecting words inside the definition (nested lookups). With a draft,
+  Confirm adds and holding Confirm selects; without Anki, upstream's Confirm.
+  The draft belongs to the looked-up word, so the button shows on the first
+  definition only; its band stays reserved under nested ones so going back
+  lays the first one out exactly as before.
+- **Every entry of a headword is upstream's now.** Upstream's
+  `DictEntryList` collects all `.idx` entries of a headword and all `.syn`
+  targets, labelled per headword. The fork's extra-entry list is gone; Dutch
+  irregular verbs put the infinitive's entries first and the form's own
+  after, through the same list. WikDict's compact view still drops the
+  labels.
