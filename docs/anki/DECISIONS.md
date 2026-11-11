@@ -508,7 +508,9 @@ whole afterwards.
   memory. A line over 16 KiB is skipped (an escaped newline is six bytes, so a
   2 KiB definition can pass 4 KiB).
 - **The card is the single-word card.** Front from `ankinote::frontHtml` with the
-  cleaned word and the dictionary form when it differs, Back as above, tags
+  cleaned word and the dictionary form when it differs (the single-word rule:
+  ASCII case does not count, so "VAN" for "van" has no separate form), Back as
+  above, tags
   `crosspoint` and `book:<title>`, the account's model. The logic lives in
   `lib/AnkiClient/AnkiVocabulary.*` with host tests (parser, row key, fields,
   window and marker).
