@@ -335,7 +335,17 @@ void loadStudy(AnkiFs& fs, const uint32_t accountId, const int64_t now, Study& o
   std::transform(pending.begin(), pending.end(), std::back_inserter(graded),
                  [](const AnkiJournal::Entry& e) { return e.cardId; });
   AnkiCardCache cache(fs, ankipaths::cardsFile(accountId), ankipaths::cacheMetaFile(accountId));
-  out.toReview = saturate16(static_cast<int64_t>(AnkiCardCache::unreviewed(cache.cardIds(), graded).size()));
+  const std::vector<int64_t> ids = cache.cardIds();
+  const auto unreviewed = static_cast<int64_t>(AnkiCardCache::unreviewed(ids, graded).size());
+  // The cache holds at most one fetch's limit; the scheduler's counts cover every card left today.
+  AnkiCardCache::Meta meta;
+  int64_t scheduled = 0;
+  if (cache.readMeta(meta)) {
+    const int64_t gradedCached = static_cast<int64_t>(ids.size()) - unreviewed;
+    scheduled = int64_t{meta.counts.newCount} + meta.counts.learning + meta.counts.due - gradedCached;
+  }
+  out.reviewable = saturate16(unreviewed);
+  out.toReview = saturate16(std::max(unreviewed, scheduled));
   out.pending = saturate16(static_cast<int64_t>(pending.size()));
 }
 

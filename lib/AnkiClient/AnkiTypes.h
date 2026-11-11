@@ -21,10 +21,12 @@ struct AnkiAccount {
   bool enabled = true;
   std::string model = "Basic";     // note type used by add-word
   std::vector<std::string> decks;  // decks to review; empty = all
-  uint8_t cacheSize = 60;          // cards per exchange, 1..200
-  uint8_t maxNewPerDay = 0;        // per-fetch cap; 0 = none (deck options apply server-side)
-  std::string lastDeck;            // default deck for add-word (a user setting; JSON key "lastDeck")
-  bool addTarget = false;          // ticked in the add-word modal (JSON key "addTarget")
+  std::string search;              // Anki search the reviewed cards must match; empty = all
+  static constexpr size_t MAX_SEARCH = 200;
+  uint8_t cacheSize = 60;    // cards per exchange, 1..200
+  uint8_t maxNewPerDay = 0;  // per-fetch cap; 0 = none (deck options apply server-side)
+  std::string lastDeck;      // default deck for add-word (a user setting; JSON key "lastDeck")
+  bool addTarget = false;    // ticked in the add-word modal (JSON key "addTarget")
 
   bool isAnkiConnect() const { return backend == AnkiBackend::AnkiConnect; }
   // AnkiDo only: the per-profile API root.
