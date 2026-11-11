@@ -45,11 +45,13 @@ class FileSource final : public ankivocab::Source {
 void AnkiVocabularyActivity::onEnter() {
   Activity::onEnter();
   ANKI_STORE.loadFromFile();
-  columns.clear();
-  masks.clear();
-  window = ankivocab::Window{};
-  cursorRow = cursorCol = top = firstCol = 0;
-  popup = Popup::None;
+
+  // ActivityManager runs onEnter without the render lock and a pending render
+  // may still draw this activity: build locally, publish in one short block.
+  std::vector<Column> newColumns;
+  ankivocab::Window newWindow;
+  std::vector<uint8_t> newMasks;
+  Empty newEmpty = Empty::No;
 
   const auto& accounts = ANKI_STORE.getAccounts();
   const std::vector<size_t> ticked = ANKI_STORE.defaultAddTargets();
@@ -58,26 +60,32 @@ void AnkiVocabularyActivity::onEnter() {
     const AnkiAccount& a = accounts[i];
     if (!a.enabled) continue;
     if (std::find(ticked.begin(), ticked.end(), i) != ticked.end()) {
-      defaults = static_cast<uint8_t>(defaults | (1u << columns.size()));
+      defaults = static_cast<uint8_t>(defaults | (1u << newColumns.size()));
     }
-    columns.push_back({a.id, a.name.empty() ? a.url : a.name, AnkiAddNoteActivity::deckChoices(a).front(), a.model});
+    newColumns.push_back({a.id, a.name.empty() ? a.url : a.name, AnkiAddNoteActivity::deckChoices(a).front(), a.model});
   }
-  if (columns.empty()) {
-    empty = Empty::NoAccounts;
-    requestUpdate();
-    return;
+  if (newColumns.empty()) {
+    newEmpty = Empty::NoAccounts;
+  } else {
+    HalFile file;
+    if (Storage.openFileForRead("ANKI", VocabularyStore::FILE_PATH, file)) {
+      FileSource source(file);
+      newWindow = ankivocab::scan(source, ANKI_STORE.getVocabDone(), MAX_ROWS);
+    }
+    newMasks.assign(newWindow.labels.size(), defaults);
+    if (newWindow.labels.empty()) newEmpty = SETTINGS.vocabularyHistoryEnabled ? Empty::NothingNew : Empty::SettingOff;
   }
 
-  HalFile file;
-  if (Storage.openFileForRead("ANKI", VocabularyStore::FILE_PATH, file)) {
-    FileSource source(file);
-    window = ankivocab::scan(source, ANKI_STORE.getVocabDone(), MAX_ROWS);
-  }
-  masks.assign(window.labels.size(), defaults);
-  if (!window.labels.empty()) {
-    empty = Empty::No;
-  } else {
-    empty = SETTINGS.vocabularyHistoryEnabled ? Empty::NothingNew : Empty::SettingOff;
+  {
+    RenderLock lock;
+    columns = std::move(newColumns);
+    window = std::move(newWindow);
+    masks = std::move(newMasks);
+    queued.assign(masks.size(), 0);
+    queuedTotal = 0;
+    empty = newEmpty;
+    cursorRow = cursorCol = top = firstCol = 0;
+    popup = Popup::None;
   }
   requestUpdate();
 }
@@ -150,11 +158,22 @@ void AnkiVocabularyActivity::moveCursor(const int row, const int col) {
   requestUpdate();
 }
 
+// After a swipe the cursor may sit on a row or column that scrolled out of
+// view; Confirm would then toggle a cell the user cannot see.
+void AnkiVocabularyActivity::clampCursorToView(const Layout& l) {
+  if (cursorRow > 0) {
+    cursorRow = std::clamp(cursorRow, top + 1, top + l.visibleRows);
+    cursorRow = std::min(cursorRow, rowCount() + 1);
+  }
+  cursorCol = std::clamp(cursorCol, firstCol, firstCol + l.visibleColumns - 1);
+}
+
 void AnkiVocabularyActivity::scrollRows(const int delta) {
   {
     RenderLock lock;
     const Layout l = layout();
     top = std::clamp(top + delta, 0, std::max(0, rowCount() + 1 - l.visibleRows));
+    clampCursorToView(l);
   }
   requestUpdate();
 }
@@ -164,11 +183,13 @@ void AnkiVocabularyActivity::scrollColumns(const int delta) {
     RenderLock lock;
     const Layout l = layout();
     firstCol = std::clamp(firstCol + delta, 0, static_cast<int>(columns.size()) - l.visibleColumns);
+    clampCursorToView(l);
   }
   requestUpdate();
 }
 
 void AnkiVocabularyActivity::toggleCell(const int word, const int col) {
+  if (isQueued(static_cast<size_t>(word), col)) return;
   {
     RenderLock lock;
     cursorRow = word + 1;
@@ -178,7 +199,7 @@ void AnkiVocabularyActivity::toggleCell(const int word, const int col) {
   requestUpdate();
 }
 
-// Unticks the column when it is full, else ticks every word.
+// Unticks the column when it is full, else ticks every word. Queued cells stay.
 void AnkiVocabularyActivity::toggleColumn(const int col) {
   const auto bit = static_cast<uint8_t>(1u << col);
   {
@@ -186,9 +207,10 @@ void AnkiVocabularyActivity::toggleColumn(const int col) {
     cursorRow = 0;
     cursorCol = col;
     const bool full = std::all_of(masks.begin(), masks.end(), [bit](const uint8_t m) { return (m & bit) != 0; });
-    std::transform(masks.begin(), masks.end(), masks.begin(), [full, bit](const uint8_t m) {
-      return full ? static_cast<uint8_t>(m & ~bit) : static_cast<uint8_t>(m | bit);
-    });
+    for (size_t row = 0; row < masks.size(); row++) {
+      masks[row] =
+          full ? static_cast<uint8_t>(masks[row] & ~(bit & ~queued[row])) : static_cast<uint8_t>(masks[row] | bit);
+    }
   }
   requestUpdate();
 }
@@ -213,6 +235,8 @@ void AnkiVocabularyActivity::handleTap(const int x, const int y) {
   const int entry = entryAt(l, y);
   if (entry < 0) return;
   if (entry == rowCount()) {
+    const Rect button = sendButton(l, entry - top);
+    if (x < button.x || x >= button.x + button.width || y < button.y || y >= button.y + button.height) return;
     {
       RenderLock lock;
       cursorRow = entry + 1;
@@ -224,51 +248,98 @@ void AnkiVocabularyActivity::handleTap(const int x, const int y) {
   if (col >= 0) toggleCell(entry, col);
 }
 
-// One note per ticked cell, written the way Add to Anki writes them. The
-// marker moves only when every note was queued, so a failed send can be
-// retried; a half-written one repeats its first notes, which the server's
-// "update" dedupe merges.
-void AnkiVocabularyActivity::send() {
-  bool ok = true;
-  int queued = 0;
+// The Send entry as drawn, in the table slot `slot`.
+Rect AnkiVocabularyActivity::sendButton(const Layout& l, const int slot) const {
+  return Rect{l.x, l.rowsTop + slot * l.rowHeight + 4, l.width, l.rowHeight - 8};
+}
+
+// Queues one note per ticked cell that is not queued yet, written the way Add
+// to Anki writes them, and marks each cell in `queuedNow` as it is appended.
+// False when a write failed or the file is no longer the one that was scanned.
+bool AnkiVocabularyActivity::queuePending(std::vector<uint8_t>& queuedNow, const size_t pending, int& added) {
   HalFile file;
-  if (Storage.openFileForRead("ANKI", VocabularyStore::FILE_PATH, file)) {
-    FileSource source(file);
-    AnkiStorageFs& fs = AnkiStorageFs::instance();
-    std::vector<AnkiNoteQueue> queues;
-    queues.reserve(columns.size());
-    for (size_t c = 0; c < columns.size(); c++) {
-      const auto bit = static_cast<uint8_t>(1u << c);
-      // An account that never synced has no data directory yet.
-      if (std::any_of(masks.begin(), masks.end(), [bit](const uint8_t m) { return (m & bit) != 0; })) {
+  if (!Storage.openFileForRead("ANKI", VocabularyStore::FILE_PATH, file)) return false;
+  FileSource source(file);
+  AnkiStorageFs& fs = AnkiStorageFs::instance();
+  std::vector<AnkiNoteQueue> queues;
+  queues.reserve(columns.size());
+  for (size_t c = 0; c < columns.size(); c++) {
+    const auto bit = static_cast<uint8_t>(1u << c);
+    // An account that never synced has no data directory yet.
+    for (size_t row = 0; row < masks.size(); row++) {
+      if ((masks[row] & ~queuedNow[row] & bit) != 0) {
         fs.mkdirs(ankipaths::accountDir(columns[c].id));
+        break;
       }
-      queues.emplace_back(fs, ankipaths::notesFile(columns[c].id));
     }
-    ankivocab::forEachRow(source, window, [&](const size_t row, const ankivocab::Record& record) {
-      if (!ok || masks[row] == 0) return;
-      const AnkiNoteQueue::Note base = ankivocab::toNote(record);
-      for (size_t c = 0; c < columns.size() && ok; c++) {
-        if (!(masks[row] & (1u << c))) continue;
-        AnkiNoteQueue::Note note = base;
-        note.clientId = ankidevice::nextClientId();
-        note.deck = columns[c].deck;
-        note.model = columns[c].model;
-        ok = queues[c].append(note);
-        if (ok) queued++;
+    queues.emplace_back(fs, ankipaths::notesFile(columns[c].id));
+  }
+
+  const uint32_t firstId = ankidevice::reserveClientIds(static_cast<uint32_t>(pending));
+  uint32_t used = 0;
+  bool ok = true;
+  const bool whole = ankivocab::forEachRow(source, window, [&](const size_t row, const ankivocab::Record& record) {
+    if (!ok) return;
+    if (row >= masks.size() || row >= queuedNow.size()) {
+      ok = false;
+      return;
+    }
+    const auto todo = static_cast<uint8_t>(masks[row] & ~queuedNow[row]);
+    if (todo == 0) return;
+    const AnkiNoteQueue::Note base = ankivocab::toNote(record);
+    for (size_t c = 0; c < columns.size() && ok; c++) {
+      if (!(todo & (1u << c))) continue;
+      if (used == pending) {
+        ok = false;
+        return;
       }
-    });
-  } else {
+      AnkiNoteQueue::Note note = base;
+      note.clientId = ankidevice::clientId(firstId + used++);
+      note.deck = columns[c].deck;
+      note.model = columns[c].model;
+      ok = queues[c].append(note);
+      if (ok) {
+        queuedNow[row] = static_cast<uint8_t>(queuedNow[row] | (1u << c));
+        added++;
+      }
+    }
+  });
+  return ok && whole;
+}
+
+// The marker moves only when every ticked cell is queued, so a failed send can
+// be retried: cells queued by an earlier try are skipped, and a try that only
+// failed to save the marker queues nothing and saves it again.
+void AnkiVocabularyActivity::send() {
+  std::vector<uint8_t> queuedNow = queued;  // this task is the only writer; render only reads
+  size_t pending = 0;
+  for (size_t row = 0; row < masks.size(); row++) {
+    pending += static_cast<size_t>(__builtin_popcount(masks[row] & ~queuedNow[row]));
+  }
+
+  bool ok = true;
+  int added = 0;
+  if (pending > 0) {
+    {
+      RenderLock lock;
+      snprintf(popupText, sizeof(popupText), "%s", tr(STR_LOADING_POPUP));
+      popup = Popup::Busy;
+    }
+    requestUpdateAndWait();
+    ok = queuePending(queuedNow, pending, added);
+    if (!ok) LOG_ERR("ANKI", "Failed to queue looked-up words");
+  }
+  if (ok && window.last && !ANKI_STORE.setVocabDone(*window.last)) {
+    LOG_ERR("ANKI", "Failed to save the sent-words marker");
     ok = false;
   }
-  if (ok && window.last && !ANKI_STORE.setVocabDone(*window.last))
-    LOG_ERR("ANKI", "Failed to save the sent-words marker");
-  if (!ok) LOG_ERR("ANKI", "Failed to queue looked-up words");
 
   {
     RenderLock lock;
+    queued = std::move(queuedNow);
+    queuedTotal += added;
     if (ok) {
-      snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED_NOTES), queued);
+      snprintf(popupText, sizeof(popupText), tr(STR_ANKI_QUEUED_NOTES), queuedTotal);
     } else {
       snprintf(popupText, sizeof(popupText), "%s", tr(STR_ANKI_QUEUE_FAILED));
     }
@@ -411,11 +482,11 @@ void AnkiVocabularyActivity::drawTable(const Layout& l) const {
     const int y = l.rowsTop + slot * l.rowHeight;
     const bool selectedRow = cursorRow == entry + 1;
     if (entry == rowCount()) {
-      const int h = l.rowHeight - 8;
+      const Rect button = sendButton(l, slot);
       if (selectedRow) {
-        renderer.fillRoundedRect(l.x, y + 4, l.width, h, 6, Color::Black);
+        renderer.fillRoundedRect(button.x, button.y, button.width, button.height, 6, Color::Black);
       } else {
-        renderer.drawRoundedRect(l.x, y + 4, l.width, h, 2, 6, true);
+        renderer.drawRoundedRect(button.x, button.y, button.width, button.height, 2, 6, true);
       }
       const char* label = tr(STR_ANKI_SEND);
       const int w = renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD);

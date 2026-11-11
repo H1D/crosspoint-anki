@@ -17,6 +17,10 @@
 // like Add to Anki; the next sync delivers them) and moves the "vocabDone"
 // marker in anki.json past the window, so unticked words are dismissed.
 //
+// A cell that was queued stays ticked and cannot be unticked while the screen
+// is open, so a Send that failed halfway can be repeated without queuing a
+// word twice; the marker moves once every ticked cell is queued.
+//
 // Side buttons move between rows (the header row, every word, then Send),
 // front Left/Right between accounts, Confirm toggles a cell, a whole column
 // on the header row, or sends. Taps toggle a cell or a column header; swipes
@@ -34,7 +38,7 @@ class AnkiVocabularyActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class Popup : uint8_t { None, Queued, Failed };
+  enum class Popup : uint8_t { None, Busy, Queued, Failed };
   enum class Empty : uint8_t { No, NoAccounts, SettingOff, NothingNew };
 
   struct Column {
@@ -68,7 +72,11 @@ class AnkiVocabularyActivity final : public Activity {
   void activate();
   void toggleCell(int row, int col);
   void toggleColumn(int col);
+  void clampCursorToView(const Layout& l);
+  bool isQueued(size_t row, int col) const { return (queued[row] & (1u << col)) != 0; }
+  Rect sendButton(const Layout& l, int slot) const;
   void send();
+  bool queuePending(std::vector<uint8_t>& queuedNow, size_t pending, int& added);
   void handleTap(int x, int y);
 
   void drawTable(const Layout& l) const;
@@ -78,7 +86,9 @@ class AnkiVocabularyActivity final : public Activity {
 
   ankivocab::Window window;
   std::vector<Column> columns;
-  std::vector<uint8_t> masks;  // per row: bit c = column c ticked
+  std::vector<uint8_t> masks;   // per row: bit c = column c ticked
+  std::vector<uint8_t> queued;  // per row: bit c = a note for column c was queued (always also ticked)
+  int queuedTotal = 0;
   Empty empty = Empty::No;
 
   int cursorRow = 0;
