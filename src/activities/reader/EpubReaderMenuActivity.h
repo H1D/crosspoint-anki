@@ -31,7 +31,8 @@ class EpubReaderMenuActivity final : public UiListActivity {
     SYNC,
     DELETE_CACHE,
     DICTIONARY,
-    ANKI_ADD
+    ANKI_ADD,
+    ANKI_SEND_WORDS
   };
 
   struct MenuItem {
