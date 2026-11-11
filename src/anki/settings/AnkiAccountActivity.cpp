@@ -24,6 +24,7 @@ enum Row : int {
   ROW_TOKEN,
   ROW_ENABLED,
   ROW_DECKS,
+  ROW_CARD_FILTER,
   ROW_DEFAULT_DECK,
   ROW_MODEL,
   ROW_CACHE_SIZE,
@@ -52,8 +53,8 @@ AnkiAccountActivity::AnkiAccountActivity(GfxRenderer& renderer, MappedInputManag
   // once here rather than every buildScreen() call.
   static constexpr StrId fieldNames[BASE_ITEMS] = {
       StrId::STR_ANKI_ACCOUNT_NAME, StrId::STR_ANKI_BACKEND,   StrId::STR_ANKI_SERVER_URL, StrId::STR_ANKI_PROFILE,
-      StrId::STR_ANKI_TOKEN,        StrId::STR_ANKI_ENABLED,   StrId::STR_ANKI_DECKS,      StrId::STR_ANKI_DEFAULT_DECK,
-      StrId::STR_ANKI_NOTE_TYPE,    StrId::STR_ANKI_CACHE_SIZE};
+      StrId::STR_ANKI_TOKEN,        StrId::STR_ANKI_ENABLED,   StrId::STR_ANKI_DECKS,      StrId::STR_ANKI_CARD_FILTER,
+      StrId::STR_ANKI_DEFAULT_DECK, StrId::STR_ANKI_NOTE_TYPE, StrId::STR_ANKI_CACHE_SIZE};
   for (int i = 0; i < BASE_ITEMS; i++) {
     fieldRowItems[i].label = I18N.get(fieldNames[i]);
     fieldRowItems[i].actionValue = static_cast<int16_t>(i);
@@ -163,6 +164,9 @@ void AnkiAccountActivity::editText(const StrId titleId, std::string AnkiAccount:
     const auto& kb = std::get<KeyboardResult>(result.data);
     const bool bareScheme = type == InputType::Url && (kb.text == "https://" || kb.text == "http://");
     editAccount.*field = bareScheme ? "" : kb.text;
+    // A blank card filter would be a search Anki rejects.
+    if (field == &AnkiAccount::search && kb.text.find_first_not_of(' ') == std::string::npos)
+      editAccount.search.clear();
     saveAccount();
     requestUpdate();
   };
@@ -258,6 +262,9 @@ void AnkiAccountActivity::handleSelection() {
     case ROW_DECKS:
       openDeckPicker();
       break;
+    case ROW_CARD_FILTER:
+      editText(StrId::STR_ANKI_CARD_FILTER, &AnkiAccount::search, AnkiAccount::MAX_SEARCH, InputType::Text);
+      break;
     case ROW_DEFAULT_DECK:
       openDefaultDeckPicker();
       break;
@@ -324,6 +331,7 @@ void AnkiAccountActivity::buildScreen(UiScreen& screen) {
     snprintf(deckCountBuf, sizeof(deckCountBuf), "%u", static_cast<unsigned>(editAccount.decks.size()));
     fieldRowItems[ROW_DECKS].value = deckCountBuf;
   }
+  fieldRowItems[ROW_CARD_FILTER].value = editAccount.search.empty() ? tr(STR_NOT_SET) : editAccount.search.c_str();
   fieldRowItems[ROW_DEFAULT_DECK].value = editAccount.lastDeck.empty() ? tr(STR_NOT_SET) : editAccount.lastDeck.c_str();
   fieldRowItems[ROW_MODEL].value = editAccount.model.empty() ? tr(STR_NOT_SET) : editAccount.model.c_str();
   snprintf(cacheSizeBuf, sizeof(cacheSizeBuf), "%u", static_cast<unsigned>(editAccount.cacheSize));

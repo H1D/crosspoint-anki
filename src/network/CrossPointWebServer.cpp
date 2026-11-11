@@ -1960,6 +1960,7 @@ void CrossPointWebServer::handleGetAnkiAccounts() const {
     doc["model"] = a.model;
     JsonArray decks = doc["decks"].to<JsonArray>();
     for (const std::string& d : a.decks) decks.add(d);
+    doc["search"] = a.search;
     doc["cacheSize"] = a.cacheSize;
     doc["defaultDeck"] = a.lastDeck;  // deck for new words
     // Deck names cached by the last sync, for the web deck picker
@@ -2024,6 +2025,10 @@ void CrossPointWebServer::handlePostAnkiAccount() {
   // Token is optional: the web UI omits it when the user left the field empty
   if (!readString("token", account.token, MAX_TOKEN)) {
     server->send(400, "text/plain", "Token too long");
+    return;
+  }
+  if (!readString("search", account.search, AnkiAccount::MAX_SEARCH)) {
+    server->send(400, "text/plain", "Card filter too long (200 bytes)");
     return;
   }
   if (!readString("defaultDeck", account.lastDeck, MAX_DECK)) {

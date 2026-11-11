@@ -667,6 +667,10 @@
         '<span class="setting-control">' + deckControl + '</span>' +
       '</div>' +
       '<div class="setting-row">' +
+        '<span class="setting-name">Card filter</span>' +
+        '<span class="setting-control"><input type="text" maxlength="200" id="anki-search-' + id + '" value="' + escapeHtml(acc.search || '') + '" placeholder="Anki search, e.g. -note:&quot;Image Occlusion Enhanced&quot;"></span>' +
+      '</div>' +
+      '<div class="setting-row">' +
         '<span class="setting-name">Deck for new words</span>' +
         '<span class="setting-control"><select id="anki-defdeck-' + id + '">' + defaultOptions + '</select></span>' +
       '</div>' +
@@ -730,7 +734,7 @@
     // Prevent multiple unsaved new-account forms at once (idx -1 -> id "new")
     if (document.getElementById('anki-new')) return;
     addBtn.insertAdjacentHTML('beforebegin',
-      renderAnkiAccount({name:'',backend:'ankido',url:'',profile:'',hasToken:false,enabled:true,decks:[],availableDecks:[],model:'Basic',cacheSize:60}, -1));
+      renderAnkiAccount({name:'',backend:'ankido',url:'',profile:'',hasToken:false,enabled:true,decks:[],availableDecks:[],search:'',model:'Basic',cacheSize:60}, -1));
   }
 
   async function saveAnkiAccount(idx) {
@@ -750,6 +754,7 @@
       profile: document.getElementById('anki-profile-' + id).value,
       enabled: document.getElementById('anki-enabled-' + id).checked,
       decks: decks,
+      search: document.getElementById('anki-search-' + id).value.trim(),
       defaultDeck: document.getElementById('anki-defdeck-' + id).value,
       model: document.getElementById('anki-model-' + id).value,
       cacheSize: parseInt(document.getElementById('anki-cache-' + id).value, 10) || 60,

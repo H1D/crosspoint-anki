@@ -200,7 +200,7 @@ void AnkiDashboardActivity::loop() {
     return;
   }
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-    run(study.toReview > 0 ? Action::Review : Action::Sync);
+    run(study.reviewable > 0 ? Action::Review : Action::Sync);
   } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
     run(Action::Sync);
   } else if (severalAccounts && mappedInput.wasReleased(MappedInputManager::Button::Left)) {
@@ -217,8 +217,8 @@ Rect AnkiDashboardActivity::safeArea() const {
 AnkiDashboardActivity::ActionBar AnkiDashboardActivity::actionBar() const {
   ActionBar bar;
   if (!mappedInput.hasTouch() || !hasAccount) return bar;
-  bar.actions[bar.count++] = study.toReview > 0 ? Action::Review : Action::Sync;
-  if (study.toReview > 0) bar.actions[bar.count++] = Action::Sync;
+  bar.actions[bar.count++] = study.reviewable > 0 ? Action::Review : Action::Sync;
+  if (study.reviewable > 0) bar.actions[bar.count++] = Action::Sync;
   if (severalAccounts) bar.actions[bar.count++] = Action::Account;
 
   const Rect safe = safeArea();

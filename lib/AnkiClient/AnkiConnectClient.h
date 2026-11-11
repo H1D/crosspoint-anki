@@ -62,8 +62,9 @@ class AnkiConnectClient {
 
   bool ensureProfile(const AnkiAccount& account, AnkiSyncResult& r);
   bool fetchDeckList(const AnkiAccount& account, std::vector<AnkiDeck>& decks, AnkiSyncResult& r);
+  // Appends up to `limit` matching ids; `matched`, when given, counts every match.
   bool findCards(const AnkiAccount& account, const char* state, size_t limit, std::vector<int64_t>& ids,
-                 AnkiSyncResult& r);
+                 AnkiSyncResult& r, size_t* matched = nullptr);
   bool fetchQueue(const AnkiAccount& account, AnkiSyncResult& r);
   // First two field names of a note type (cached per session); Front/Back when unknown.
   std::pair<std::string, std::string> fieldNames(const AnkiAccount& account, const std::string& model);
