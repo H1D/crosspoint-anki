@@ -282,8 +282,7 @@ async function flash() {
     });
     ui.progressLabel.textContent = 'Done';
     setResult('ok',
-      `<strong>Flashed ${sourceLabel} to ${result.partition}.</strong><br>${device.bootSteps.join(' ')}` +
-      '<br><strong>The first boot is slow: wait at least 2 minutes before you touch anything.</strong>');
+      `<strong>Flashed ${sourceLabel} to ${result.partition}.</strong><br>${device.bootSteps.join(' ')}`);
     showDoneDialog(device, sourceLabel, result.partition);
   } catch (err) {
     const idx = states.findIndex((s) => s === 'running');
