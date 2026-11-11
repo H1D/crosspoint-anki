@@ -114,6 +114,11 @@ TEST(AnkiVocabulary, FrontIsTheSingleWordCard) {
   ASSERT_TRUE(ankivocab::parseRecord(record("2", "walk.", "walk"), r));
   EXPECT_EQ(ankivocab::label(r), "walk");
   EXPECT_EQ(ankivocab::toNote(r).front, "<b>walk</b>");
+
+  // Only ASCII case differs: the word as written stays on top, as on the single-word screen.
+  ASSERT_TRUE(ankivocab::parseRecord(record("3", "VAN", "van", R"(,"sentence":"LOGBOEK VAN BRAM")"), r));
+  EXPECT_EQ(ankivocab::label(r), "VAN");
+  EXPECT_EQ(ankivocab::toNote(r).front, "<b>VAN</b><br><br>LOGBOEK <b>VAN</b> BRAM");
 }
 
 TEST(AnkiVocabulary, BackIsTheForkKeyElseTheCollapsedDefinition) {

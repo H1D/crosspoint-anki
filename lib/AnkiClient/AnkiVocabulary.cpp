@@ -48,10 +48,18 @@ std::string lower(const std::string& s) {
   return out;
 }
 
-// The dictionary form when it differs from the word, as the single-word screen decides it.
+// The dictionary form when it differs from the word the way the single-word
+// screen decides it: Dictionary::cleanWord, which lowercases ASCII only, so
+// "Walk" for "walk" is not a different word.
 std::string differingHeadword(const Record& r) {
-  const std::string h = ankinote::cleanWord(r.headword);
-  return !h.empty() && h != ankinote::cleanWord(r.word) ? r.headword : std::string();
+  const auto comparable = [](const std::string& text) {
+    std::string out = ankinote::cleanWord(text);
+    std::transform(out.begin(), out.end(), out.begin(),
+                   [](const char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c + 0x20) : c; });
+    return out;
+  };
+  const std::string headword = comparable(r.headword);
+  return !headword.empty() && headword != comparable(r.word) ? r.headword : std::string();
 }
 
 // Whitespace runs become one space (the card breaks lines on spaces only),
