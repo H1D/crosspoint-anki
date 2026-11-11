@@ -732,3 +732,8 @@ STR_KOREADER_CUSTOM_HEADER_1_NAME: "Nombre de la cabecera personalizada 1 de KOR
 STR_KOREADER_CUSTOM_HEADER_1_VALUE: "Valor de la cabecera personalizada 1 de KOReader"
 STR_KOREADER_CUSTOM_HEADER_2_NAME: "Nombre de la cabecera personalizada 2 de KOReader"
 STR_KOREADER_CUSTOM_HEADER_2_VALUE: "Valor de la cabecera personalizada 2 de KOReader"
+STR_ANKI_SEND_WORDS: "Enviar palabras a Anki"
+STR_ANKI_SEND: "Enviar"
+STR_ANKI_QUEUED_NOTES: "%d notas en cola"
+STR_ANKI_NO_NEW_WORDS: "No hay palabras nuevas consultadas"
+STR_ANKI_VOCAB_HINT: "Para recopilar palabras, activa: Ajustes > Lector > Save Vocabulary Lookups"

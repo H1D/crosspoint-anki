@@ -724,3 +724,8 @@ STR_KOREADER_CUSTOM_HEADER_1_NAME: "Nom de la capçalera personalitzada 1 del KO
 STR_KOREADER_CUSTOM_HEADER_1_VALUE: "Valor de la capçalera personalitzada 1 del KOReader"
 STR_KOREADER_CUSTOM_HEADER_2_NAME: "Nom de la capçalera personalitzada 2 del KOReader"
 STR_KOREADER_CUSTOM_HEADER_2_VALUE: "Valor de la capçalera personalitzada 2 del KOReader"
+STR_ANKI_SEND_WORDS: "Envia paraules a l'Anki"
+STR_ANKI_SEND: "Envia"
+STR_ANKI_QUEUED_NOTES: "%d notes a la cua"
+STR_ANKI_NO_NEW_WORDS: "Cap paraula nova consultada"
+STR_ANKI_VOCAB_HINT: "Per recollir paraules, activa: Configuració > Lector > Save Vocabulary Lookups"
