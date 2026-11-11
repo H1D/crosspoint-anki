@@ -41,7 +41,12 @@ def file_at(ref, path):
     try:
         return git("show", f"{ref}:{path}")
     except subprocess.CalledProcessError:
-        return None
+        pass
+    # A submodule has no blob; its diff line is "Subproject commit <sha>".
+    entry = git("ls-tree", ref, "--", path).split()
+    if len(entry) >= 3 and entry[0] == "160000":
+        return f"Subproject commit {entry[2]}\n"
+    return None
 
 
 def main():
