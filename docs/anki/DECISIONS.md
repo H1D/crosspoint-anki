@@ -243,7 +243,8 @@ whole afterwards.
   the sync screen shows the same "rejected" hint as an AnkiDo 401.
 - **Sleep-entry sync** works unchanged: `exchange(wantCards=false)` is one
   `answerCards` request (plus `loadProfile` when a profile is set) and
-  `pushNotes` is one request per note, all under the same 4 s HTTP timeout.
+  `pushNotes` is one request per note, all under the same 4 s HTTP timeout
+  (in chunks of ten since 2026-11-11, see the last section).
 - **Add-word modal is a checklist (2026-09-28).** One toggle row per enabled
   account (subtitle: the deck this add goes to, Left/Right changes it for
   this add only) and an "Add" row; the note is queued once per checked
@@ -535,10 +536,55 @@ whole afterwards.
   condition (an enabled account). Not on the Anki dashboard: the words come
   from reading, and the dashboard is per account.
 - **No sync.** Send only queues notes (`notes.jsonl`); the sleep-entry and Anki
-  app syncs deliver them. If an append fails, Send stops, shows the failure and
-  leaves the marker, so a retry queues the same words again. Notes already
-  written are queued twice, which the server's `dedupe: update` merges.
-- **Strings.** Five keys in all 35 language files, drafted by the assistant and
-  unreviewed. The empty-screen hint is built from each language's own
-  Settings and Reader names; the setting's name is English where its
-  translation does not exist yet.
+  app syncs deliver them. A failed append stops Send, shows the failure and
+  leaves the marker; see "Queued cells" below for how a retry goes.
+
+## Chunked note push and a retryable Send (2026-11-11)
+
+- **Ten notes per request.** A sync used to load every queued note, build one
+  body from them and load the queue again to drop the acked ones. A note is
+  about 1.3 KB, so 100 queued words peaked at several hundred KB on a 380 KB
+  device. `AnkiNoteQueue::drain` now reads at most `PUSH_CHUNK` (10) notes,
+  hands them to the backend, rewrites the queue, and reads the next ten. Both
+  backends use it: AnkiDo sends one `POST /notes` per chunk, AnkiConnect one
+  `addNote` per note inside the chunk. A chunk is about 13 KB of notes and the
+  same again as request body.
+- **The queue is rewritten per chunk, line by line.** `removeAcked` copies the
+  lines that stay into `notes.jsonl.tmp` and renames it over the queue, so it
+  never holds the file. If a read or a write fails it removes the temp file and
+  leaves the queue as it was; a read error is not taken for the end of the
+  file. A failed rewrite ends the push with "SD write failed" instead of
+  sending the same chunk again.
+- **When the loop stops.** The queue is empty; a request failed (transport or
+  auth: the unsent notes stay); the time budget is spent; or a chunk acked
+  nothing, so a note the server keeps refusing costs one request, not one per
+  chunk. Notes refused in a chunk stay queued and are skipped for the rest of
+  the call, so ten refused notes do not hide the ones behind them.
+  `notesSent` counts notes offered to the server and `notesAcked` those it
+  finished with, summed over the chunks.
+- **Time budget.** The sleep-entry sync (15 s, `main.cpp`) checked it between
+  steps only. `AnkiSyncEngine::shouldStop` is now also asked before every chunk
+  and ends the push with the rest left for the next sync. The Anki app's
+  manual sync sets none.
+- **Queued cells.** The table keeps, per cell, a bit that says a note was
+  queued in this screen's lifetime (RAM only). Send skips such cells, and they
+  draw as checked and cannot be unticked (Confirm or a tap does nothing; a
+  column toggle leaves them alone). The marker moves only when every ticked
+  cell is queued, so after a failure Send can be pressed again without queuing
+  a word twice. Leaving the screen forgets the bits; the words not marked done
+  show again, as before.
+- **A failed marker save is a failed send.** The "Could not queue the note"
+  popup shows and the screen stays open. The retry has nothing left to queue
+  and only saves the marker again.
+- **Send's second pass checks the file.** `forEachRow` returns true only if it
+  read without error, produced exactly the scanned number of rows and ended on
+  the record the window ends on (same offset, same id). A file that changed
+  between the scan and Send, or a read that failed, is a failed send and the
+  marker stays.
+- **Client ids and the busy popup.** A send reserves its ids with
+  `ankidevice::reserveClientIds(n)`, one counter write, not one per note (a
+  batch can be 800). It shows the existing "Loading" popup and paints it before
+  the blocking pass; no new string, so no translation work.
+- **Touch.** After a swipe the cursor moves to the nearest visible row and
+  column, so Confirm never acts on a cell that is off screen. A tap is Send
+  only inside the drawn button.
