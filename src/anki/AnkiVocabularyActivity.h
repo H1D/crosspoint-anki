@@ -74,7 +74,7 @@ class AnkiVocabularyActivity final : public Activity {
   void toggleColumn(int col);
   void clampCursorToView(const Layout& l);
   bool isQueued(size_t row, int col) const { return (queued[row] & (1u << col)) != 0; }
-  Rect sendButton(const Layout& l, int slot) const;
+  static Rect sendButton(const Layout& l, int slot);
   void send();
   bool queuePending(std::vector<uint8_t>& queuedNow, size_t pending, int& added);
   void handleTap(int x, int y);

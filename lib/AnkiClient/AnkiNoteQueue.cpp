@@ -95,9 +95,8 @@ size_t AnkiNoteQueue::count() const {
   AnkiLineReader lines(*f);
   std::string line;
   size_t n = 0;
-  Note note;
   while (lines.next(line)) {
-    note = Note{};
+    Note note;
     if (!line.empty() && parseLine(line, note)) n++;
   }
   f->close();

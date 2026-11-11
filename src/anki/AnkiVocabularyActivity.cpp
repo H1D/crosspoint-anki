@@ -249,7 +249,7 @@ void AnkiVocabularyActivity::handleTap(const int x, const int y) {
 }
 
 // The Send entry as drawn, in the table slot `slot`.
-Rect AnkiVocabularyActivity::sendButton(const Layout& l, const int slot) const {
+Rect AnkiVocabularyActivity::sendButton(const Layout& l, const int slot) {
   return Rect{l.x, l.rowsTop + slot * l.rowHeight + 4, l.width, l.rowHeight - 8};
 }
 
