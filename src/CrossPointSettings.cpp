@@ -277,6 +277,7 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
         s.*field = static_cast<uint8_t>(HomeButtonAction::AnkiAdd);
       }
     }
+    needsResave = true;
   }
   if (BoardConfig::hasHomeKey() && doc["homeButtonLongPressAction"].isNull() &&
       !doc["longPressMenuFunction"].isNull()) {
