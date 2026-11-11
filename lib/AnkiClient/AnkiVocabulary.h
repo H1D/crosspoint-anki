@@ -65,7 +65,10 @@ struct Window {
 Window scan(Source& source, const std::optional<Marker>& done, size_t maxRows);
 
 // Calls `onRow(row, record)` for the first record of each row of `window`,
-// in row order.
-void forEachRow(Source& source, const Window& window, const std::function<void(size_t row, const Record&)>& onRow);
+// in row order. Returns true only when the file still is the one the window
+// was scanned from: no read error, exactly window.labels.size() rows, and the
+// last record at window.last's offset with its id. On false some rows may
+// not have been delivered.
+bool forEachRow(Source& source, const Window& window, const std::function<void(size_t row, const Record&)>& onRow);
 
 }  // namespace ankivocab

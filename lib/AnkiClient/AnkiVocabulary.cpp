@@ -123,9 +123,14 @@ class Lines {
   // Offset of the next unread byte.
   size_t position() const { return offset; }
 
+  // True when the seek or a read failed: the lines seen so far are not the
+  // whole file, whatever next() said.
+  bool failed() const { return !seeked || readFailed; }
+
  private:
   bool refill() {
     const int n = seeked ? source.read(buf, sizeof(buf)) : 0;
+    if (n < 0) readFailed = true;
     if (n <= 0) return false;
     filled = static_cast<size_t>(n);
     used = 0;
@@ -135,6 +140,7 @@ class Lines {
   Source& source;
   size_t offset;
   bool seeked;
+  bool readFailed = false;
   char buf[256] = {};
   size_t used = 0;
   size_t filled = 0;
@@ -232,21 +238,27 @@ Window scan(Source& source, const std::optional<Marker>& done, const size_t maxR
   return window;
 }
 
-void forEachRow(Source& source, const Window& window, const std::function<void(size_t, const Record&)>& onRow) {
-  if (!window.last) return;
+bool forEachRow(Source& source, const Window& window, const std::function<void(size_t, const Record&)>& onRow) {
+  if (!window.last) return window.labels.empty();
   std::vector<std::string> keys;
   Lines lines(source, window.from);
   std::string line;
   size_t start = 0;
   Record r;
+  Marker seen;
+  bool any = false;
   while (lines.next(line, start) && start <= window.last->pos) {
     if (!parseRecord(line, r)) continue;
+    seen = Marker{start, r.id};
+    any = true;
     const std::string key = rowKey(r);
     if (std::find(keys.begin(), keys.end(), key) == keys.end()) {
       keys.push_back(key);
       onRow(keys.size() - 1, r);
     }
   }
+  return !lines.failed() && any && keys.size() == window.labels.size() && seen.pos == window.last->pos &&
+         seen.id == window.last->id;
 }
 
 }  // namespace ankivocab
