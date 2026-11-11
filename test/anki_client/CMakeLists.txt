@@ -1,6 +1,7 @@
 add_executable(AnkiClientTest
   AnkiClientTest.cpp
   AnkiNoteFrontTest.cpp
+  AnkiPushChunksTest.cpp
   AnkiTypeAnswerTest.cpp
   AnkiStatsTest.cpp
   AnkiVocabularyTest.cpp

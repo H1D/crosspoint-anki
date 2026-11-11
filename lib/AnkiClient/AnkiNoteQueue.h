@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -23,13 +26,39 @@ class AnkiNoteQueue {
 
   AnkiNoteQueue(AnkiFs& fs, std::string path) : fs(fs), path(std::move(path)) {}
 
+  // Notes per request (and per rewrite of the file) when pushing: bounds the
+  // RAM a push needs however long the queue is.
+  static constexpr size_t PUSH_CHUNK = 10;
+
   bool append(const Note& n);
-  std::vector<Note> load() const;
-  size_t count() const { return load().size(); }
+  // At most `maxCount` notes, after the first `skip` readable ones.
+  std::vector<Note> load(size_t maxCount = std::numeric_limits<size_t>::max(), size_t skip = 0) const;
+  size_t count() const;
   bool empty() const;
-  // Rewrites the queue without the acknowledged client ids.
+  // Rewrites the queue without the acknowledged client ids, line by line
+  // through a temp file. The queue is left alone when the copy fails.
   bool removeAcked(const std::vector<std::string>& ackedIds);
   bool clear() { return !fs.exists(path) || fs.remove(path); }
+
+  // Pushes the queue PUSH_CHUNK notes at a time. `pushChunk` sends one chunk,
+  // adds the client ids the server is done with to `acked`, and returns false
+  // when its request failed. After each chunk the acked notes leave the file.
+  // Notes the server refused stay queued and are not offered again in this call.
+  using PushChunk = std::function<bool(const std::vector<Note>& chunk, std::vector<std::string>& acked)>;
+  struct Drain {
+    enum class End : uint8_t {
+      Empty,       // nothing left to offer
+      Stopped,     // shouldStop() said the time is up; the rest stays queued
+      NoProgress,  // a chunk was entirely refused
+      Failed,      // pushChunk reported a failed request
+      SaveFailed   // the queue file could not be rewritten
+    };
+    size_t sent = 0;   // notes offered to the server
+    size_t acked = 0;  // notes the server finished with
+    End end = End::Empty;
+  };
+  // `shouldStop` (may be empty) is asked before every chunk.
+  Drain drain(const std::function<bool()>& shouldStop, const PushChunk& pushChunk);
 
   // Request body for POST /notes: notes grouped in one request, each with its
   // own deck/model override, "dedupe":"update" (see DECISIONS.md).

@@ -429,6 +429,7 @@ static void syncAnkiBeforeSleep(const bool showPopup) {
     engine.syncTimeoutSeconds = 3;
     const unsigned long syncStart = millis();
     const auto overBudget = [syncStart] { return millis() - syncStart > SYNC_BUDGET_MS; };
+    engine.shouldStop = overBudget;  // also checked before every chunk of queued notes
     for (const AnkiAccount& account : ANKI_STORE.getAccounts()) {
       if (!account.enabled || !engine.hasPending(account)) continue;
       if (overBudget()) break;

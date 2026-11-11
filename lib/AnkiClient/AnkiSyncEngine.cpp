@@ -269,73 +269,79 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchangeAnkiDo(const AnkiAccount& account
 }
 
 AnkiSyncEngine::Result AnkiSyncEngine::pushNotes(const AnkiAccount& account) {
-  if (account.isAnkiConnect()) return connect.pushNotes(account);
+  if (account.isAnkiConnect()) return connect.pushNotes(account, shouldStop);
   Result r;
+  r.ok = true;
   AnkiNoteQueue queue(fs, ankipaths::notesFile(account.id));
-  const std::vector<AnkiNoteQueue::Note> notes = queue.load();
-  r.notesSent = notes.size();
-  if (notes.empty()) {
-    r.ok = true;
-    return r;
-  }
-  const std::string body = AnkiNoteQueue::toNotesRequestJson(notes);
+  std::string firstError;
 
   // Response: {"results":[{"status":..,"client_id":..,...}]}. Every result
   // with a client_id and a status other than "error" is done for good.
-  std::vector<std::string> acked;
-  std::string key;
-  std::string clientId;
-  std::string status;
-  std::string firstError;
-  int depth = 0;
-  ankijson::Reader::Callbacks cb;
-  cb.onKey = [&](const std::string& k) { key = k; };
-  cb.onObjectStart = [&]() {
-    depth++;
-    if (depth == 2) {
-      clientId.clear();
-      status.clear();
-    }
-  };
-  cb.onObjectEnd = [&]() {
-    if (depth == 2 && !clientId.empty() && !status.empty() && status != "error") acked.push_back(clientId);
-    depth--;
-  };
-  cb.onString = [&](const std::string& v) {
-    if (depth == 2 && key == "client_id")
-      clientId = v;
-    else if (depth == 2 && key == "status")
-      status = v;
-    else if (depth == 3 && key == "message" && firstError.empty())
-      firstError = v;
-  };
-  ankijson::Reader reader(std::move(cb));
+  const auto pushChunk = [&](const std::vector<AnkiNoteQueue::Note>& chunk, std::vector<std::string>& acked) {
+    const std::string body = AnkiNoteQueue::toNotesRequestJson(chunk);
+    std::string key;
+    std::string clientId;
+    std::string status;
+    int depth = 0;
+    ankijson::Reader::Callbacks cb;
+    cb.onKey = [&](const std::string& k) { key = k; };
+    cb.onObjectStart = [&]() {
+      depth++;
+      if (depth == 2) {
+        clientId.clear();
+        status.clear();
+      }
+    };
+    cb.onObjectEnd = [&]() {
+      if (depth == 2 && !clientId.empty() && !status.empty() && status != "error") acked.push_back(clientId);
+      depth--;
+    };
+    cb.onString = [&](const std::string& v) {
+      if (depth == 2 && key == "client_id")
+        clientId = v;
+      else if (depth == 2 && key == "status")
+        status = v;
+      else if (depth == 3 && key == "message" && firstError.empty())
+        firstError = v;
+    };
+    ankijson::Reader reader(std::move(cb));
 
-  std::string errorBody;
-  const int httpStatus = http.request("POST", account.apiBase() + "/notes", authHeaders(account), body,
-                                      [&](int st, const uint8_t* data, size_t len) {
-                                        if (st >= 200 && st < 300) {
-                                          reader.feed(reinterpret_cast<const char*>(data), len);
-                                        } else if (errorBody.size() < 1024) {
-                                          errorBody.append(reinterpret_cast<const char*>(data), len);
-                                        }
-                                        return true;
-                                      });
-  classify(r, httpStatus);
-  if (!r.ok) {
-    ErrorCollector ec;
-    ec.reader.feed(errorBody);
-    r.error = ec.text().empty() ? statusText(httpStatus) : ec.text();
-    return r;
-  }
-  if (reader.hasError()) {
+    std::string errorBody;
+    const int httpStatus = http.request("POST", account.apiBase() + "/notes", authHeaders(account), body,
+                                        [&](int st, const uint8_t* data, size_t len) {
+                                          if (st >= 200 && st < 300) {
+                                            reader.feed(reinterpret_cast<const char*>(data), len);
+                                          } else if (errorBody.size() < 1024) {
+                                            errorBody.append(reinterpret_cast<const char*>(data), len);
+                                          }
+                                          return true;
+                                        });
+    classify(r, httpStatus);
+    if (!r.ok) {
+      ErrorCollector ec;
+      ec.reader.feed(errorBody);
+      r.error = ec.text().empty() ? statusText(httpStatus) : ec.text();
+      acked.clear();
+      return false;
+    }
+    if (reader.hasError()) {
+      r.ok = false;
+      r.error = "Bad response";
+      acked.clear();
+      return false;
+    }
+    return true;
+  };
+
+  const AnkiNoteQueue::Drain d = queue.drain(shouldStop, pushChunk);
+  r.notesSent = d.sent;
+  r.notesAcked = d.acked;
+  if (d.end == AnkiNoteQueue::Drain::End::SaveFailed) {
     r.ok = false;
-    r.error = "Bad response";
-    return r;
+    r.error = "SD write failed";
+  } else if (r.ok && d.acked < d.sent && !firstError.empty()) {
+    r.error = firstError;  // informational
   }
-  if (!acked.empty()) queue.removeAcked(acked);
-  r.notesAcked = acked.size();
-  if (acked.size() < notes.size() && !firstError.empty()) r.error = firstError;  // informational
   return r;
 }
 

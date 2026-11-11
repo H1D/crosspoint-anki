@@ -67,8 +67,9 @@ bool AnkiNoteQueue::append(const Note& n) {
   return ok;
 }
 
-std::vector<AnkiNoteQueue::Note> AnkiNoteQueue::load() const {
+std::vector<AnkiNoteQueue::Note> AnkiNoteQueue::load(const size_t maxCount, size_t skip) const {
   std::vector<Note> notes;
+  if (maxCount == 0) return notes;
   auto f = fs.open(path, AnkiFs::Mode::Read);
   if (!f) return notes;
   AnkiLineReader lines(*f);
@@ -76,10 +77,31 @@ std::vector<AnkiNoteQueue::Note> AnkiNoteQueue::load() const {
   while (lines.next(line)) {
     if (line.empty()) continue;
     Note n;
-    if (parseLine(line, n)) notes.push_back(std::move(n));
+    if (!parseLine(line, n)) continue;
+    if (skip > 0) {
+      skip--;
+      continue;
+    }
+    notes.push_back(std::move(n));
+    if (notes.size() == maxCount) break;
   }
   f->close();
   return notes;
+}
+
+size_t AnkiNoteQueue::count() const {
+  auto f = fs.open(path, AnkiFs::Mode::Read);
+  if (!f) return 0;
+  AnkiLineReader lines(*f);
+  std::string line;
+  size_t n = 0;
+  Note note;
+  while (lines.next(line)) {
+    note = Note{};
+    if (!line.empty() && parseLine(line, note)) n++;
+  }
+  f->close();
+  return n;
 }
 
 bool AnkiNoteQueue::empty() const {
@@ -100,15 +122,65 @@ bool AnkiNoteQueue::empty() const {
 
 bool AnkiNoteQueue::removeAcked(const std::vector<std::string>& ackedIds) {
   if (ackedIds.empty()) return true;
-  std::string remaining;
+  auto in = fs.open(path, AnkiFs::Mode::Read);
+  if (!in) return true;
+  const std::string tmp = path + ".tmp";
+  auto out = fs.open(tmp, AnkiFs::Mode::Write);
+  if (!out) return false;
+  AnkiLineReader lines(*in);
+  std::string line;
   size_t kept = 0;
-  for (const Note& n : load()) {
+  bool ok = true;
+  while (ok && lines.next(line)) {
+    Note n;
+    if (line.empty() || !parseLine(line, n)) continue;
     if (std::find(ackedIds.begin(), ackedIds.end(), n.clientId) != ackedIds.end()) continue;
+    line.push_back('\n');
+    ok = out->write(line) == line.size();
     kept++;
-    remaining += toLine(n);
   }
-  if (kept == 0) return clear();
-  return fs.writeAllAtomic(path, remaining);
+  in->close();
+  ok = out->close() && ok && !lines.failed();
+  if (!ok) {
+    fs.remove(tmp);
+    return false;
+  }
+  if (kept == 0) {
+    fs.remove(tmp);
+    return clear();
+  }
+  if (fs.exists(path)) fs.remove(path);
+  return fs.rename(tmp, path);
+}
+
+AnkiNoteQueue::Drain AnkiNoteQueue::drain(const std::function<bool()>& shouldStop, const PushChunk& pushChunk) {
+  Drain d;
+  size_t refused = 0;  // refused notes sit in front of everything not yet offered
+  for (;;) {
+    const std::vector<Note> chunk = load(PUSH_CHUNK, refused);
+    if (chunk.empty()) return d;
+    if (shouldStop && shouldStop()) {
+      d.end = Drain::End::Stopped;
+      return d;
+    }
+    d.sent += chunk.size();
+    std::vector<std::string> acked;
+    const bool requested = pushChunk(chunk, acked);
+    if (!removeAcked(acked)) {
+      d.end = Drain::End::SaveFailed;
+      return d;
+    }
+    d.acked += acked.size();
+    if (!requested) {
+      d.end = Drain::End::Failed;
+      return d;
+    }
+    if (acked.empty()) {
+      d.end = Drain::End::NoProgress;
+      return d;
+    }
+    if (acked.size() < chunk.size()) refused += chunk.size() - acked.size();
+  }
 }
 
 std::string AnkiNoteQueue::toNotesRequestJson(const std::vector<Note>& notes) {
