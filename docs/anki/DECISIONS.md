@@ -473,3 +473,70 @@ whole afterwards.
   irregular verbs put the infinitive's entries first and the form's own
   after, through the same list. WikDict's compact view still drops the
   labels.
+
+## Send looked-up words (2026-11-11)
+
+- **Which words.** The ones in upstream's `/Vocabulary.txt`, which every
+  successful dictionary lookup appends to while Settings > Reader > Save
+  Vocabulary Lookups is on, since the last send. The screen reads that file and
+  keeps no list of its own. With the setting off nothing is recorded, and the
+  empty screen says where to turn it on.
+- **Two extra record keys.** A record holds the dictionary's definition (plain
+  text, 2 KiB), not the sentence or the short translation Add to Anki would
+  have used, so a batch card would have been poorer than a single one. When the
+  lookup could also have been an add-word (an account is enabled, or it came
+  from Add to Anki), `DictionaryWordSelectActivity::performLookup` builds the
+  note draft first and the record gets `"sentence"` (at most 512 bytes) and
+  `"back"` (at most 600) after `start_offset`. Older records, or lookups made
+  with no account, have neither: no sentence, and Back is the definition with
+  whitespace collapsed and cut at 600 bytes on a UTF-8 boundary. The upstream
+  file diff is the two fields in `VocabularyContext` and the write.
+- **The "already sent" marker.** `anki.json` has `"vocabDone": {"pos", "id"}`,
+  the byte offset where the last handled record starts and its id. A scan seeks
+  there, checks the id and starts after that record. If the id differs (the
+  file was replaced or deleted) it starts at 0. Not the file's size or time and
+  not removing lines: the file is upstream's and may be exported or cleared,
+  and rewriting a file of several MB on an ESP32 is the wrong cost. Send moves
+  the marker to the last record of the window even when nothing is ticked, so
+  unticked words are dismissed. A word looked up again later is a new row.
+- **Rows.** One row per distinct word, the first record wins. The key is the
+  dictionary form (the word when there is none), cleaned of punctuation and
+  lowercased (ASCII, Latin-1 and basic Cyrillic), so "Walked", "walked," and
+  "walks" (headword walk) are one row. At most 100 rows per window; the rest
+  show on the next open. RAM holds a label and a one-byte tick mask per row;
+  Send walks the file again for the details, so 100 definitions are never in
+  memory. A line over 16 KiB is skipped (an escaped newline is six bytes, so a
+  2 KiB definition can pass 4 KiB).
+- **The card is the single-word card.** Front from `ankinote::frontHtml` with the
+  cleaned word and the dictionary form when it differs, Back as above, tags
+  `crosspoint` and `book:<title>`, the account's model. The logic lives in
+  `lib/AnkiClient/AnkiVocabulary.*` with host tests (parser, row key, fields,
+  window and marker).
+- **Table.** Rows are words, columns the enabled accounts, a checkbox in each
+  cell drawn like a list toggle. A column is as wide as an eight-letter name and
+  the box; the word column keeps at least two fifths of the width. When the
+  accounts do not fit, the window of columns follows the cursor (and swipes
+  left and right) and two small arrows in the corner say more exist. Rows
+  scroll with swipes, and a held Up/Down pages. Side buttons move between rows
+  (header row, words, Send), front Left/Right between columns, Confirm toggles
+  the cell, a whole column on the header row (clears it when full, else fills
+  it), or sends. Taps: a cell, a column header, Send. Not a `UiListActivity`:
+  one FreeInkApp holds 24 interactions and a table has hundreds of cells, so it
+  is a plain `Activity` with its own hit test, like the dashboard.
+- **Defaults and decks.** A column starts ticked by Add to Anki's rule (flagged
+  accounts, else the review account, else the first enabled one;
+  `AnkiAccountStore::defaultAddTargets`, now shared). The table never changes
+  `addTarget`: sending a day of words says nothing about where single adds go.
+  Each account's notes go to the deck Add to Anki would preselect
+  (`AnkiAddNoteActivity::deckChoices`, first entry). No deck choice per cell.
+- **Entry.** Reader menu item right after Add to Anki, shown on the same
+  condition (an enabled account). Not on the Anki dashboard: the words come
+  from reading, and the dashboard is per account.
+- **No sync.** Send only queues notes (`notes.jsonl`); the sleep-entry and Anki
+  app syncs deliver them. If an append fails, Send stops, shows the failure and
+  leaves the marker, so a retry queues the same words again. Notes already
+  written are queued twice, which the server's `dedupe: update` merges.
+- **Strings.** Five keys in all 35 language files, drafted by the assistant and
+  unreviewed. The empty-screen hint is built from each language's own
+  Settings and Reader names; the setting's name is English where its
+  translation does not exist yet.

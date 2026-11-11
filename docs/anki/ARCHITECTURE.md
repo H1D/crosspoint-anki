@@ -20,6 +20,8 @@ lib/AnkiClient/          host-testable core (no Arduino types, no ArduinoJson)
   AnkiCardCache.*        cached queue (cards.jsonl + cache.json)
   AnkiStats.*            reviews per day for the dashboard (stats.json): wire parsers, day anchor,
                          merge with the journal, streak, heatmap levels
+  AnkiVocabulary.*       looked-up words (upstream's /Vocabulary.txt): record parser, row key, note fields,
+                         window scan from the "vocabDone" marker
   AnkiSyncEngine.*       one sync session per account (exchange, stats, notes, decks); dispatches per backend
   AnkiConnectClient.*    the same steps spoken as AnkiConnect actions (Anki desktop)
 test/anki_client/        gtest suite: cmake -S test -B build/test && cmake --build build/test --target AnkiClientTest
@@ -30,11 +32,12 @@ src/anki/                firmware side
   AnkiSecureHttp.*       AnkiHttp over SecureHttpClient -> AnkiSecureHttp::instance()
   AnkiDevice.*           ankidevice::deviceId(), nextClientId(), nowEpoch() (RTC, for answered_at),
                          wallEpoch() (RTC or SNTP clock, for days on screen and the engine clock)
-  AnkiAccountStore.*     ANKI_STORE singleton, /.crosspoint/anki.json
+  AnkiAccountStore.*     ANKI_STORE singleton, /.crosspoint/anki.json (accounts + the "vocabDone" marker)
   settings/              account list / editor / deck picker activities   (agent: settings)
   review/                AnkiDashboardActivity (app entry), AnkiAccountPickerActivity,
                          AnkiReviewActivity, AnkiSyncActivity              (agent: review)
   AnkiAddNoteActivity.*  add-word modal                                    (agent: add-word)
+  AnkiVocabularyActivity.*  Send Words to Anki table (reader menu)
 ```
 
 ## Using the core from an activity
