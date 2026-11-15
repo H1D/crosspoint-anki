@@ -103,6 +103,7 @@ std::string AnkiConnectClient::buildSearch(const AnkiAccount& account, const cha
     }
     q += ") ";
   }
+  if (!account.search.empty()) q += "(" + account.search + ") ";
   q += state;
   return q;
 }
@@ -313,8 +314,8 @@ AnkiSyncResult AnkiConnectClient::fetchDecks(const AnkiAccount& account) {
 }
 
 bool AnkiConnectClient::findCards(const AnkiAccount& account, const char* state, const size_t limit,
-                                  std::vector<int64_t>& ids, AnkiSyncResult& r) {
-  if (limit == 0) return true;
+                                  std::vector<int64_t>& ids, AnkiSyncResult& r, size_t* matched) {
+  if (limit == 0 && !matched) return true;
   std::string params = "{\"query\":";
   ankijson::appendQuoted(params, buildSearch(account, state));
   params.push_back('}');
@@ -325,10 +326,12 @@ bool AnkiConnectClient::findCards(const AnkiAccount& account, const char* state,
   cb.onArrayEnd = [&]() { depth--; };
   cb.onNumber = [&](const std::string& v) {
     // The whole id list streams through; only the first `limit` are kept.
-    if (depth == 1 && taken < limit) {
+    if (depth != 1) return;
+    if (taken < limit) {
       ids.push_back(ankijson::toInt64(v));
       taken++;
     }
+    if (matched) (*matched)++;
   };
   const Call c = call(account, "findCards", params, std::move(cb));
   if (!c.ok) {
@@ -366,13 +369,29 @@ bool AnkiConnectClient::fetchQueue(const AnkiAccount& account, AnkiSyncResult& r
   const size_t limit = account.cacheSize == 0 ? 60 : account.cacheSize;
   std::vector<int64_t> ids;
   ids.reserve(limit);
+  // With a search the deck numbers count cards it leaves out: count the matches
+  // instead, capped by the deck numbers, which carry the daily limits.
+  const bool filtered = !account.search.empty();
+  size_t learnMatched = 0;
+  size_t dueMatched = 0;
+  size_t newMatched = 0;
   // Learning cards first (they were failed recently), then reviews, then new.
   // The three searches are disjoint: is:learn is queue-based, is:new is type-based.
-  if (!findCards(account, "is:learn -is:suspended -is:buried", limit, ids, r)) return false;
-  if (!findCards(account, "is:due -is:learn", limit - ids.size(), ids, r)) return false;
+  // A deck count of 0 caps the matches at 0, so that search is only run to fill the cache.
+  auto counter = [filtered](size_t& n, uint16_t deckCount) { return filtered && deckCount > 0 ? &n : nullptr; };
+  if (!findCards(account, "is:learn -is:suspended -is:buried", limit, ids, r, counter(learnMatched, counts.learning)))
+    return false;
+  if (!findCards(account, "is:due -is:learn", limit - ids.size(), ids, r, counter(dueMatched, counts.due)))
+    return false;
   size_t newCap = std::min(limit - ids.size(), static_cast<size_t>(counts.newCount));
   if (account.maxNewPerDay > 0) newCap = std::min(newCap, static_cast<size_t>(account.maxNewPerDay));
-  if (!findCards(account, "is:new -is:suspended -is:buried", newCap, ids, r)) return false;
+  if (!findCards(account, "is:new -is:suspended -is:buried", newCap, ids, r, counter(newMatched, counts.newCount)))
+    return false;
+  if (filtered) {
+    counts.learning = static_cast<uint16_t>(std::min<size_t>(counts.learning, learnMatched));
+    counts.due = static_cast<uint16_t>(std::min<size_t>(counts.due, dueMatched));
+    counts.newCount = static_cast<uint16_t>(std::min<size_t>(counts.newCount, newMatched));
+  }
 
   const std::string cardsTmp = ankipaths::cardsFile(account.id) + ".tmp";
   std::unique_ptr<AnkiFile> out = fs.open(cardsTmp, AnkiFs::Mode::Write);

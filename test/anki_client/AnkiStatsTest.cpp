@@ -317,4 +317,29 @@ TEST(AnkiStats, LoadStudyReadsStatsJournalAndCache) {
   EXPECT_EQ(s.pending, 2);
   EXPECT_EQ(s.reviewedToday, 2);
   EXPECT_EQ(s.streak, 2);
+
+  // The server's counts reach past the cached cards; grades on this device come off them.
+  AnkiCardCache::Meta meta;
+  meta.counts.newCount = 11;
+  meta.counts.learning = 26;
+  meta.counts.due = 213;
+  meta.counts.returned = 3;
+  ASSERT_TRUE(AnkiCardCache(fs, ankipaths::cardsFile(ID), ankipaths::cacheMetaFile(ID)).writeMeta(meta));
+  ankistats::loadStudy(fs, ID, NOON, s);
+  EXPECT_EQ(s.toReview, 248);
+  EXPECT_EQ(s.reviewable, 1);
+
+  // Counts below the cache (an old server, or none): the unreviewed cards still count.
+  meta.counts = AnkiCounts{};
+  ASSERT_TRUE(AnkiCardCache(fs, ankipaths::cardsFile(ID), ankipaths::cacheMetaFile(ID)).writeMeta(meta));
+  ankistats::loadStudy(fs, ID, NOON, s);
+  EXPECT_EQ(s.toReview, 1);
+
+  // Every cached card graded: cards are left on the server, none to review here until a sync.
+  meta.counts.due = 10;
+  ASSERT_TRUE(AnkiCardCache(fs, ankipaths::cardsFile(ID), ankipaths::cacheMetaFile(ID)).writeMeta(meta));
+  journal.append(graded(103, 0));
+  ankistats::loadStudy(fs, ID, NOON, s);
+  EXPECT_EQ(s.toReview, 7);
+  EXPECT_EQ(s.reviewable, 0);
 }

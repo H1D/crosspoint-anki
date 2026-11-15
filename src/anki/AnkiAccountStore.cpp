@@ -36,6 +36,7 @@ void AnkiAccountStore::toJson(JsonDocument& doc) const {
     obj["model"] = a.model;
     JsonArray decks = obj["decks"].to<JsonArray>();
     for (const auto& d : a.decks) decks.add(d);
+    obj["search"] = a.search;
     obj["cacheSize"] = a.cacheSize;
     obj["lastDeck"] = a.lastDeck;
     obj["addTarget"] = a.addTarget;
@@ -75,6 +76,8 @@ bool AnkiAccountStore::fromJson(JsonVariantConst doc) {
     // Not read: per-day limits are Anki deck options; 0 = no fetch cap.
     a.maxNewPerDay = 0;
     a.lastDeck = obj["lastDeck"] | "";
+    a.search = obj["search"] | "";
+    if (a.search.size() > AnkiAccount::MAX_SEARCH) a.search.clear();
     a.addTarget = obj["addTarget"] | false;
     JsonArrayConst decks = obj["decks"].as<JsonArrayConst>();
     a.decks.reserve(decks.size());

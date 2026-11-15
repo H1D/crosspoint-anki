@@ -67,6 +67,10 @@ std::string AnkiSyncEngine::buildExchangeBody(const AnkiAccount& account,
     body += "\"kinds\":[\"due\",\"learning\",\"new\"]";
     body += ",\"limit\":" + std::to_string(account.cacheSize == 0 ? 60 : account.cacheSize);
     if (account.maxNewPerDay > 0) body += ",\"max_new_per_day\":" + std::to_string(account.maxNewPerDay);
+    if (!account.search.empty()) {
+      body += ",\"search\":";
+      ankijson::appendQuoted(body, account.search);
+    }
     body += ",\"fields\":\"compact\",\"render\":\"text\"}";
   } else {
     // Nothing wanted back: ask for an empty queue rather than the default 60.

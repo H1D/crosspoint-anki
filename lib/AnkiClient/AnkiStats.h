@@ -106,7 +106,8 @@ struct Study {
   };
   Days days = Days::None;
   AnkiDay today = ANKI_NO_DAY;  // rightmost heatmap day
-  uint16_t toReview = 0;        // cached cards not graded on this device
+  uint16_t toReview = 0;        // cards left today: the server's counts, at least `reviewable`
+  uint16_t reviewable = 0;      // cached cards not graded on this device
   uint16_t pending = 0;         // grades waiting for upload
   uint16_t reviewedToday = 0;
   uint16_t streak = 0;         // days with reviews up to today; an empty today does not break it yet

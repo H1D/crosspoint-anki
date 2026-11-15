@@ -320,6 +320,10 @@ TEST(AnkiSyncEngine, ExchangeBody) {
   const std::string all = AnkiSyncEngine::buildExchangeBody(a, {}, true, 15);
   EXPECT_EQ(all.find("\"decks\""), std::string::npos);
   EXPECT_EQ(all.find("max_new_per_day"), std::string::npos);
+  EXPECT_EQ(all.find("\"search\""), std::string::npos);
+  a.search = "-note:\"Image Occlusion\"";
+  EXPECT_NE(AnkiSyncEngine::buildExchangeBody(a, {}, true, 15).find(R"("search":"-note:\"Image Occlusion\"")"),
+            std::string::npos);
 }
 
 TEST(AnkiSyncEngine, ExchangeStreamsCardsAndAcksReviews) {
@@ -673,6 +677,38 @@ TEST(AnkiConnectClient, RequestBodyAndSearch) {
             "(\"deck:Dutch::Common\" OR \"deck:A \\\"b\\\" c\\_d\\*\") is:new");
   a.decks.clear();
   EXPECT_EQ(AnkiConnectClient::buildSearch(a, "is:new"), "is:new");
+  a.search = "-note:Cloze OR tag:x";
+  EXPECT_EQ(AnkiConnectClient::buildSearch(a, "is:new"), "(-note:Cloze OR tag:x) is:new");
+}
+
+TEST(AnkiConnectClient, SearchCountsOnlyMatchingCards) {
+  MemFs fs;
+  FakeConnect http;
+  AnkiSyncEngine engine(fs, http, [] { return int64_t{1700000000}; });
+  AnkiAccount a = connectAccount();
+  a.search = "-note:Cloze";
+  http.responses["deckNames"] = "{\"result\":[\"Dutch::Common\"],\"error\":null}";
+  http.responses["getDeckStats"] =
+      "{\"result\":{\"1\":{\"name\":\"Dutch::Common\",\"new_count\":3,\"learn_count\":0,\"review_count\":2}},"
+      "\"error\":null}";
+  // Every search matches one card, so the deck numbers (3 new, 2 due) shrink to the matches.
+  http.responses["findCards"] = "{\"result\":[7],\"error\":null}";
+  http.responses["cardsInfo"] = "{\"result\":[],\"error\":null}";
+
+  const AnkiSyncEngine::Result r = engine.syncAccount(a, /*wantCards=*/true);
+  EXPECT_TRUE(r.ok) << r.error;
+  EXPECT_NE(http.last("findCards").find("(-note:Cloze) is:new"), std::string::npos);
+  EXPECT_EQ(r.counts.newCount, 1);
+  EXPECT_EQ(r.counts.learning, 0);
+  EXPECT_EQ(r.counts.due, 1);
+
+  // No new cards left in the deck: the new-card search is not run just to count.
+  http.responses["getDeckStats"] =
+      "{\"result\":{\"1\":{\"name\":\"Dutch::Common\",\"new_count\":0,\"learn_count\":0,\"review_count\":2}},"
+      "\"error\":null}";
+  http.bodies.clear();
+  EXPECT_TRUE(engine.syncAccount(a, /*wantCards=*/true).ok);
+  EXPECT_EQ(http.count("findCards"), 2u);
 }
 
 TEST(AnkiConnectClient, ExchangeAnswersCardsAndStreamsQueue) {

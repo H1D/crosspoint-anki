@@ -588,3 +588,33 @@ whole afterwards.
 - **Touch.** After a swipe the cursor moves to the nearest visible row and
   column, so Confirm never acts on a cell that is off screen. A tap is Send
   only inside the drawn button.
+
+## Card filter and the "to review" count (2026-11-11)
+
+- **"To review" is the server's count, not the cache size.** The card cache
+  holds at most one fetch (`cacheSize`, 60 by default), so a collection with
+  250 cards left showed 60. `loadStudy` now shows the larger of the unreviewed
+  cached cards and `cache.json`'s new + learning + due minus the cached cards
+  graded on this device. An old server or an empty `counts` falls back to the
+  cache. Needs AnkiDo 0.4.0 for counts that cover every deck (0.3.0 stopped at
+  the deck that filled the page).
+  Review or Sync as the main action still follows the cached cards: with all
+  of them graded and cards left on the server, the main action is Sync.
+- **Per-account "Card filter": an Anki search.** Some note types cannot be
+  shown on e-ink (Image Occlusion, map cards). The account's `search` string
+  goes to AnkiDo as `want.search` and is ANDed into every AnkiConnect
+  `findCards` query, so both backends use Anki's own syntax: `-note:"Image
+  Occlusion Enhanced"` drops a note type, `card:` a card template. Filtering
+  is server-side: filtered cards take no fetch slots and are left out of the
+  counts. Rejected: a list of note types to pick from (needs a note-type
+  endpoint on both backends and a picker; the search covers it and more).
+  The field is set on the web settings page or with the device keyboard (up
+  to 200 characters); empty means every card. An AnkiDo before 0.4.0 refuses
+  the field (HTTP 422), so it is only sent when set.
+- **Counts with a filter.** AnkiDo counts the matching cards in Anki's built
+  queue, so deck daily limits apply before the filter: a filtered-out card can
+  still use its deck's limit. AnkiConnect has no filtered deck counts; the
+  device counts each `findCards` result and caps it by the deck's
+  `getDeckStats` number, which carries the daily limit. That is an upper
+  bound: filtered-out cards can fill the deck's limit. A search whose deck
+  count is 0 is skipped instead of streaming its ids only to count them.
