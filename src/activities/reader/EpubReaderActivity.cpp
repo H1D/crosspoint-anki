@@ -2231,7 +2231,15 @@ void EpubReaderActivity::renderContents(std::unique_ptr<Page> page, const int or
     // the panel receptive to the gray waveform; pending cleanup still honors
     // the scheduled/manual HALF refresh.
     renderer.displayBuffer(cleanImageBasePending ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
-    pagesUntilFullRefresh = 1;
+    if (!BoardConfig::isWsEpaper397()) {
+      pagesUntilFullRefresh = 1;
+    } else if (cleanImageBasePending) {
+      // Its only clean is the ~2 s multi-flash waveform: keep the normal cycle
+      // instead of cleaning after every image page.
+      pagesUntilFullRefresh = SETTINGS.getRefreshFrequency();
+    } else {
+      pagesUntilFullRefresh--;
+    }
   } else if (combinedGrayscaleBase) {
     // Stash the base without activating; displayGrayBuffer() below commits
     // base + grays as one waveform.
