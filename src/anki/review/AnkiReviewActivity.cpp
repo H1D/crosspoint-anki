@@ -5,6 +5,7 @@
 #include <AnkiTypeAnswer.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
+#include <HalBoardCompat.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -17,6 +18,7 @@
 
 #include "CrossPointSettings.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "anki/AnkiAudio.h"
 #include "anki/AnkiDevice.h"
 #include "anki/AnkiStorageFs.h"
 #include "components/UITheme.h"
@@ -30,6 +32,7 @@ constexpr int SIDE_PADDING = 20;
 constexpr int GRADE_COUNT = 4;
 constexpr int TYPE_BOX_PADDING = 8;  // text inset inside the type-in box
 constexpr size_t MAX_TYPED_BYTES = 200;
+constexpr unsigned long REPLAY_HOLD_MS = 600;  // Confirm held this long plays the side's sounds again
 
 const char* gradeLabel(const int index) {
   switch (index) {
@@ -64,6 +67,7 @@ void AnkiReviewActivity::onEnter() {
 
 void AnkiReviewActivity::onExit() {
   Activity::onExit();
+  ankiaudio::stop();
   if (auto* fcm = renderer.getFontCacheManager()) {
     fcm->releaseSdFontCaches();
   }
@@ -119,8 +123,47 @@ bool AnkiReviewActivity::loadCurrent() {
     }
   }
   mode = Mode::Front;
+  queueSounds(0);
   layout();
   return true;
+}
+
+// Boards with a side rocker and no Left/Right keys cannot reach Again and
+// Good directly: there Up/Down move a selection along the grade strip and
+// Confirm grades.
+bool AnkiReviewActivity::gradesBySelection() const {
+  return !mappedInput.hasTouch() && !BoardConfig::hasHorizontalKeys();
+}
+
+void AnkiReviewActivity::queueSounds(const size_t fromRun) {
+  sounds.clear();
+  nextSound = 0;
+  soundsChanged = true;
+  if (!ankiaudio::available()) return;
+  for (size_t i = fromRun; i < runs.size(); i++) {
+    if (runs[i].sound) sounds.push_back(runs[i].text);
+  }
+}
+
+// Plays the queued sounds one after another and lets the codec sleep after
+// the last. Runs outside the RenderLock: stopping a sound waits for the
+// playback task.
+void AnkiReviewActivity::pumpAudio() {
+  if (soundsChanged) {
+    soundsChanged = false;
+    if (audioActive) ankiaudio::stop();
+    audioActive = false;
+  }
+  if (!audioActive && nextSound >= sounds.size()) return;
+  if (ankiaudio::isPlaying()) return;
+  while (nextSound < sounds.size()) {
+    if (ankiaudio::play(accountId, sounds[nextSound++])) {
+      audioActive = true;
+      return;
+    }
+  }
+  ankiaudio::stop();
+  audioActive = false;
 }
 
 // The answer's "[[type:...]]" marker becomes Anki's comparison of the typed
@@ -173,12 +216,19 @@ void AnkiReviewActivity::flip() {
   runs.reserve(runs.size() + answer.size());
   runs.insert(runs.end(), std::make_move_iterator(answer.begin()), std::make_move_iterator(answer.end()));
   mode = Mode::Back;
+  selectedEase = static_cast<uint8_t>(AnkiEase::Good);
+  queueSounds(answerRunStart);
   layout();
   // Open on the page that shows the answer.
   currentPage = ruleLine >= 0 ? std::min(ruleLine / linesPerPage, totalPages - 1) : 0;
 }
 
 void AnkiReviewActivity::openTypeKeyboard() {
+  // This screen stops running while the keyboard is open, so nothing would
+  // switch the amplifier off after the sound.
+  if (audioActive) ankiaudio::stop();
+  audioActive = false;
+  nextSound = sounds.size();
   auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_ANKI_TYPE_ANSWER), typed,
                                                            MAX_TYPED_BYTES, InputType::Text);
   if (!keyboard) {
@@ -302,6 +352,7 @@ void AnkiReviewActivity::layout() {
       newLine();
     }
     const ankimarkup::Run& run = runs[ri];
+    if (run.sound) continue;
     if (run.newline) {
       newLine();
       continue;
@@ -381,6 +432,12 @@ void AnkiReviewActivity::loop() {
     return;
   }
 
+  if (!sounds.empty() && mappedInput.wasLongPressed(MappedInputManager::Button::Confirm, REPLAY_HOLD_MS)) {
+    nextSound = 0;
+    soundsChanged = true;
+  }
+  pumpAudio();
+
   int tx = 0;
   int ty = 0;
   const bool tapped = mappedInput.wasScreenTapped(tx, ty);
@@ -441,6 +498,18 @@ void AnkiReviewActivity::loop() {
           requestUpdate();
           return;
         }
+      } else if (gradesBySelection()) {
+        // ponytail: Confirm grades here, so an answer longer than one page
+        // cannot be paged on these boards. Add a paging gesture if cards need it.
+        const int step = mappedInput.wasReleased(MappedInputManager::Button::NavNext)       ? 1
+                         : mappedInput.wasReleased(MappedInputManager::Button::NavPrevious) ? -1
+                                                                                            : 0;
+        if (step != 0) {
+          selectedEase = static_cast<uint8_t>(std::clamp(selectedEase + step, 1, GRADE_COUNT));
+          requestUpdate();
+          return;
+        }
+        if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) ease = selectedEase;
       } else if (mappedInput.wasReleased(MappedInputManager::Button::ScreenLeft)) {
         ease = static_cast<uint8_t>(AnkiEase::Again);
       } else if (mappedInput.wasReleased(MappedInputManager::Button::ScreenRight)) {
@@ -540,12 +609,15 @@ void AnkiReviewActivity::drawGradeStrips() const {
   for (int i = 0; i < GRADE_COUNT; i++) {
     const int colX = i * colWidth;
     if (i > 0) renderer.drawLine(colX, top, colX, top + gradeStripHeight() - 1);
+    const bool selected = gradesBySelection() && i + 1 == selectedEase;
+    if (selected) renderer.fillRect(colX + 1, top + 1, colWidth - 1, gradeStripHeight() - 1);
     const char* label = gradeLabel(i);
     const int labelWidth = renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, colX + (colWidth - labelWidth) / 2, top + 4, label, true, EpdFontFamily::BOLD);
+    renderer.drawText(UI_10_FONT_ID, colX + (colWidth - labelWidth) / 2, top + 4, label, !selected,
+                      EpdFontFamily::BOLD);
     const std::string next = ankimarkup::stripBidiControls(card.next[i]);
     const int nextWidth = renderer.getTextWidth(SMALL_FONT_ID, next.c_str());
-    renderer.drawText(SMALL_FONT_ID, colX + (colWidth - nextWidth) / 2, top + 6 + labelHeight, next.c_str());
+    renderer.drawText(SMALL_FONT_ID, colX + (colWidth - nextWidth) / 2, top + 6 + labelHeight, next.c_str(), !selected);
   }
 }
 
@@ -567,6 +639,8 @@ void AnkiReviewActivity::drawHints() const {
           {StrId::STR_ANKI_HARD, StrId::STR_ANKI_EASY},   // PortraitInverted
           {StrId::STR_ANKI_AGAIN, StrId::STR_ANKI_GOOD},  // LandscapeCounterClockwise
       };
+      // With grades picked by selection the side keys carry no grade.
+      if (gradesBySelection()) break;
       const auto& side = SIDE_LABELS[static_cast<int>(renderer.getOrientation()) & 3];
       GUI.drawSideButtonHints(renderer, I18n::getInstance().get(side[0]), I18n::getInstance().get(side[1]));
       break;

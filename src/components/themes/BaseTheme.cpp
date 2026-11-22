@@ -1,8 +1,8 @@
 #include "BaseTheme.h"
 
-#include <BoardConfig.h>
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
+#include <HalBoardCompat.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -214,9 +214,11 @@ void BaseTheme::drawHintLabel(const GfxRenderer& renderer, const int fontId, con
   }
 }
 
+bool BaseTheme::buttonHintsHidden() { return gpio.hasTouch() || !BoardConfig::hasHorizontalKeys(); }
+
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-  if (gpio.hasTouch()) {
+  if (buttonHintsHidden()) {
     return;
   }
 

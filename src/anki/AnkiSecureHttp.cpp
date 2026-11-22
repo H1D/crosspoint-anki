@@ -40,7 +40,10 @@ int AnkiSecureHttp::request(const char* method, const std::string& url, const st
   const int status =
       http.sendRequest(method, reinterpret_cast<const uint8_t*>(body.data()), body.size(),
                        [&](const uint8_t* data, size_t len) { return onData(http.getStatus(), data, len); });
+  // The client reports the header status even when the connection dropped in
+  // the middle of the body: a cut-off media file would be kept as complete.
+  const bool truncated = status > 0 && !http.responseComplete() && !http.callbackAborted();
   http.end();
-  LOG_DBG("ANKI", "-> %d", status);
-  return status;
+  LOG_DBG("ANKI", "-> %d%s", status, truncated ? " (body cut off)" : "");
+  return truncated ? -3 : status;
 }

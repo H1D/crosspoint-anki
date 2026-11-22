@@ -618,3 +618,54 @@ whole afterwards.
   `getDeckStats` number, which carries the daily limit. That is an upper
   bound: filtered-out cards can fill the deck's limit. A search whose deck
   count is 0 is skipped instead of streaming its ids only to count them.
+
+## Card audio and the Waveshare 3.97 (2026-11-20)
+
+- **Board.** `ws397` builds for the Waveshare ESP32-S3-ePaper-3.97. The board
+  code is upstream's open PR (crosspoint-reader#3386) applied as is. Its SDK
+  part (freeink-sdk#218) is not in our pinned SDK, so
+  `lib/hal/HalBoardCompat.h` carries the one helper the firmware calls,
+  `hasHorizontalKeys()`. Delete that file when the pin moves past #218. The
+  refresh tuning from #218 is not here.
+- **Three keys.** The board has Up, OK, Down and BOOT (Back). Review grades by
+  selection there: Up/Down move along the grade strip, OK grades, Good is
+  preselected. On the dashboard Down syncs and Up picks the account. Open:
+  an answer longer than one page cannot be paged on this board, and the Send
+  Words table cannot change column.
+- **Audio plays on boards with a speaker**, today only this one
+  (`HAL_AUDIO_AVAILABLE`). `lib/hal/HalAudio` wraps the SDK `AudioManager`.
+  Three things in it belong in the SDK and go away when the SDK has them:
+  the ES8311 pin profile (`WS397_AUDIO`, the SDK profile still says
+  `NO_AUDIO`; a `static_assert` fails the build when that changes), the
+  `-DFREEINK_CAP_AUDIO=1` flag in the `ws397` envs, and the codec standby
+  sequence. The codec has no power pin, so `HalAudio::powerDown()` writes
+  Espressif's standby sequence after the last sound. Not measured: standby
+  current, and the level of the amplifier pin (GPIO39) in deep sleep.
+- **Simulator.** Its HAL headers live in another repository. It needs
+  `HalBoardCompat.h` there (or `hasHorizontalKeys()` in its `BoardConfig`).
+  `HalAudio.h` is only included in `ws397` builds.
+- **Which side a sound belongs to.** AnkiDo after 0.4.0 lists the sounds of
+  each side in `q_sounds` and `a_sounds` (Anki's own play lists, so a sound
+  in `{{FrontSide}}` belongs to the question only). An older AnkiDo only
+  lists `media`: then a sound plays with the answer, or with the question
+  when it has no text (a listening card). On a board with a speaker the sync
+  writes the result into the cached card text as `[sound:name]` markers. The
+  review screen plays a side's markers when the side appears; holding OK
+  plays them again.
+- **Files.** A sync of the review account downloads the `.mp3` and `.wav`
+  files the cached cards mark to `/.crosspoint/anki/<id>/media/`, once each,
+  2 MB at most. The file name on the card is a hash of the media name: the
+  name comes from the server and never becomes a path. Nothing prunes the
+  folder yet. The sync that runs when you leave the Anki app downloads too;
+  the sync before sleep does not.
+- **Decoding.** MP3 is decoded while it plays, with the Helix decoder that
+  ships in the Arduino core. A sound costs about 33 KB of heap while it plays.
+  After the first sound the I2S driver keeps about 6 KB until the next boot.
+- **Lead-in.** After the codec wakes from standby the output loses the start
+  of a sound: 150 to 160 ms, measured on one unit with a stepped tone and a
+  microphone. `HalAudio::leadInMs()` is 400 ms of silence, which `AnkiAudio`
+  puts in front of every sound; with it nothing was lost, also during a
+  screen refresh.
+- **Not done.** AnkiConnect audio (its media call returns base64 inside JSON,
+  which the streaming reader would hold whole), a volume setting, other
+  formats (`.ogg`, `.m4a`), and audio on the Metalio module (16 kHz only).

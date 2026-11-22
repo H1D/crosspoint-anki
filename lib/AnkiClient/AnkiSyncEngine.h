@@ -17,6 +17,7 @@
 //   2. GET  /stats     — reviews per day for the dashboard (stats.json)
 //   3. POST /notes     — queued add-word notes
 //   4. GET  /decks     — deck list for the pickers
+//   5. GET  /media/..  — audio of the fetched cards (review account, fetchAudio only)
 // Accounts with backend == AnkiConnect take the same steps through
 // AnkiConnectClient. Everything is streamed to or from the SD card; no
 // response is held whole.
@@ -44,6 +45,10 @@ class AnkiSyncEngine {
   // Reviews per day -> stats.json. A failure leaves the old file.
   Result fetchStats(const AnkiAccount& account);
 
+  // Downloads the audio the cached cards mark and the SD card lacks; returns
+  // the number of files fetched. AnkiDo only: AnkiConnect has no media step.
+  size_t fetchMedia(const AnkiAccount& account);
+
   // True when the account has anything to upload.
   bool hasPending(const AnkiAccount& account);
 
@@ -57,6 +62,10 @@ class AnkiSyncEngine {
   // Seconds AnkiDo may spend on its inline AnkiWeb sync. Short: the device is
   // on battery and holds the radio up for the whole request.
   int syncTimeoutSeconds = 15;
+
+  // Set on boards with a speaker: fetched cards then carry "[sound:name]"
+  // markers (AnkiMedia.h) and syncAccount() downloads the files they name.
+  bool fetchAudio = false;
 
   // Asked before every chunk of queued notes (and between steps by callers
   // that run on a time budget); true leaves the rest of the queue for the

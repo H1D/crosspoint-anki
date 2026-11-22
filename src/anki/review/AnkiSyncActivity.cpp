@@ -12,6 +12,7 @@
 #include "SilentRestart.h"
 #include "activities/network/WifiSelectionActivity.h"
 #include "anki/AnkiAccountStore.h"
+#include "anki/AnkiAudio.h"
 #include "anki/AnkiDevice.h"
 #include "anki/AnkiSecureHttp.h"
 #include "anki/AnkiStorageFs.h"
@@ -75,6 +76,7 @@ void AnkiSyncActivity::onWifiSelectionComplete(const bool success) {
 
 void AnkiSyncActivity::performSync() {
   AnkiSyncEngine engine(AnkiStorageFs::instance(), AnkiSecureHttp::instance(), ankidevice::wallEpoch);
+  engine.fetchAudio = ankiaudio::available();
   const auto& accounts = ANKI_STORE.getAccounts();
   const int reviewIdx = ANKI_STORE.getReviewAccountIndex();
 
@@ -99,6 +101,7 @@ void AnkiSyncActivity::performSync() {
     reviews += r.reviewsAcked;
     notes += r.notesAcked;
     cards += r.cardsFetched;
+    if (r.mediaFetched > 0) LOG_DBG("ANKI", "Fetched %u audio files", static_cast<unsigned>(r.mediaFetched));
     if (!r.ok) {
       failed = true;
       authFailed = authFailed || r.authFailed;

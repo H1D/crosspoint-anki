@@ -91,6 +91,8 @@ jobs:
             asset: firmware.bin
           - env: sticky
             asset: firmware-sticky.bin
+          - env: ws397
+            asset: firmware-ws397.bin
           - env: x4pro
             asset: firmware-x4pro.bin
           - env: x4c

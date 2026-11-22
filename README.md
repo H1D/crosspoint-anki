@@ -40,6 +40,8 @@ Plugin refresh times are a firmware feature (`"wake": ["07:55", "19:05"]` on a `
 
 **<https://h1d.github.io/crosspoint-anki/>** — Chrome or Edge, USB cable, pick your device and release, Connect & Flash.
 
+**Waveshare ESP32-S3-ePaper-3.97** (`pio run -e ws397`; the web flasher has it from the next release). The board has three side keys and BOOT as Back. In a review, Up/Down move along Again / Hard / Good / Easy and OK grades; on the Anki dashboard Down syncs and Up picks the account. Its speaker plays card audio: with an AnkiDo account a sync downloads the `.mp3` and `.wav` files of the fetched cards, a sound plays when its card side appears, and holding OK plays it again. No audio with AnkiConnect. Battery use with audio is not measured yet.
+
 Then set up an account: File Transfer on the reader → `http://<reader-ip>/settings` → Anki accounts. Pick the server type, then either AnkiDo URL, profile and token (from `ankido token create --profile <name> --scopes read,review,add`), or the AnkiConnect URL (`http://<pc-ip>:8765`), optionally the Anki profile to load and the add-on's API key. Or drop `/.crosspoint/anki.json` on the SD card:
 
 ```json

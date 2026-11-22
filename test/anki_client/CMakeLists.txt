@@ -7,6 +7,7 @@ add_executable(AnkiClientTest
   AnkiVocabularyTest.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiJson.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiMarkup.cpp
+  ${REPO_ROOT}/lib/AnkiClient/AnkiMedia.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiJournal.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiNoteQueue.cpp
   ${REPO_ROOT}/lib/AnkiClient/AnkiCardCache.cpp

@@ -15,7 +15,8 @@
 // cards left in its cached queue one at a time (front, flip, grade), journals
 // each grade for the next sync and finishes after the last card or on Back.
 // Only the current card and its styled runs live in RAM; the cache is read
-// one line at a time.
+// one line at a time. On boards with a speaker the sounds of a side play when
+// the side appears; holding Confirm plays them again.
 class AnkiReviewActivity final : public Activity {
  public:
   AnkiReviewActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, uint32_t accountId)
@@ -25,6 +26,8 @@ class AnkiReviewActivity final : public Activity {
   void onExit() override;
   void loop() override;
   void render(RenderLock&&) override;
+  // Decoding needs the CPU at full speed, which the idle loop would lower.
+  bool skipLoopDelay() override { return audioActive; }
 
  private:
   enum class Mode { Front, Back };
@@ -54,6 +57,9 @@ class AnkiReviewActivity final : public Activity {
   bool loadCurrent();
   void flip();
   bool grade(uint8_t ease);
+  bool gradesBySelection() const;
+  void queueSounds(size_t fromRun);
+  void pumpAudio();
   void openTypeKeyboard();
   bool typeBoxContains(int y) const;
   std::vector<ankimarkup::Run> withTypeComparison(std::vector<ankimarkup::Run> answer) const;
@@ -84,6 +90,13 @@ class AnkiReviewActivity final : public Activity {
   int typeLineFirst = -1;
   int typeLineLast = -1;
   std::string typed;
+  // Boards with a side rocker and no Left/Right keys: the grade Confirm gives.
+  uint8_t selectedEase = 0;
+  // Sounds of the side on screen, in card order, and the next one to start.
+  std::vector<std::string> sounds;
+  size_t nextSound = 0;
+  bool soundsChanged = false;  // a new side: cut what the last one still plays
+  bool audioActive = false;    // the codec is awake
   int currentPage = 0;
   int totalPages = 1;
   int linesPerPage = 1;

@@ -12,6 +12,7 @@
 #include "AnkiJournal.h"
 #include "AnkiJson.h"
 #include "AnkiMarkup.h"
+#include "AnkiMedia.h"
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
 #include "AnkiStats.h"
@@ -165,6 +166,45 @@ TEST(AnkiMarkup, ParsesRuns) {
   EXPECT_TRUE(runs[8].newline);
   EXPECT_EQ(runs[9].text, "e snake_case");
   EXPECT_EQ(ankimarkup::toPlain("**x** [y]"), "x [y]");
+}
+
+TEST(AnkiMarkup, SoundMarkersBecomeSoundRuns) {
+  const auto runs = ankimarkup::parse("het huis[sound:het_huis.mp3]");
+  ASSERT_EQ(runs.size(), 2u);
+  EXPECT_FALSE(runs[0].sound);
+  EXPECT_TRUE(runs[1].sound);
+  EXPECT_FALSE(runs[1].cloze);
+  EXPECT_EQ(runs[1].text, "het_huis.mp3");
+  EXPECT_EQ(ankimarkup::toPlain("het huis[sound:het_huis.mp3]"), "het huis");
+}
+
+TEST(AnkiMedia, NamesNeverBecomePaths) {
+  EXPECT_TRUE(ankimedia::isPlayable("huis.MP3"));
+  EXPECT_TRUE(ankimedia::isPlayable("a.wav"));
+  EXPECT_FALSE(ankimedia::isPlayable("b.png"));
+  EXPECT_FALSE(ankimedia::isPlayable("c.ogg"));
+  EXPECT_FALSE(ankimedia::isPlayable(".mp3"));
+
+  const std::string path = ankimedia::path(3, "../../x/h\xC3\xA9 uis.MP3");
+  const std::string dir = ankipaths::mediaDir(3) + "/";
+  ASSERT_EQ(path.rfind(dir, 0), 0u);
+  const std::string file = path.substr(dir.size());
+  EXPECT_EQ(file.size(), 16u + 4u);
+  EXPECT_EQ(file.find_first_not_of("0123456789abcdef"), 16u);
+  EXPECT_EQ(file.substr(16), ".mp3");
+  EXPECT_NE(path, ankimedia::path(3, "other.mp3"));
+  EXPECT_EQ(path, ankimedia::path(3, "../../x/h\xC3\xA9 uis.MP3"));
+}
+
+TEST(AnkiMedia, MarkersAndNames) {
+  EXPECT_EQ(ankimedia::markers({"a.mp3", "b.png", "a.mp3", "c].mp3", "d.wav"}, "text"), "[sound:a.mp3][sound:d.wav]");
+  EXPECT_EQ(ankimedia::markers({"a.mp3"}, "q[sound:a.mp3]"), "") << "already marked by the server";
+  std::vector<std::string> names;
+  ankimedia::soundNames("x[sound:a.mp3] y [sound:b c.wav][sound:open", names);
+  ASSERT_EQ(names.size(), 2u);
+  EXPECT_EQ(names[0], "a.mp3");
+  EXPECT_EQ(names[1], "b c.wav");
+  EXPECT_EQ(ankimedia::urlEncode("h\xC3\xA9 uis/1.mp3"), "h%C3%A9%20uis%2F1.mp3");
 }
 
 TEST(AnkiMarkup, UnbalancedMarkersStayLiteral) {
@@ -364,7 +404,7 @@ TEST(AnkiSyncEngine, ExchangeStreamsCardsAndAcksReviews) {
   EXPECT_EQ(c.cardId, 1790433421131LL);
   EXPECT_EQ(c.deck, "Ankido::Test");
   EXPECT_EQ(c.q, "e2e **front** \xC3\xA9");
-  EXPECT_EQ(c.a, "back \"one\"");
+  EXPECT_EQ(c.a, "back \"one\"") << "no speaker: the text carries no sound markers";
   EXPECT_EQ(c.kind, "learning");
   EXPECT_EQ(c.mediaCount, 2);
   EXPECT_EQ(ankimarkup::stripBidiControls(c.next[1]), "<10m");
@@ -513,6 +553,100 @@ TEST(AnkiSyncEngine, SyncAccountRunsAllSteps) {
   EXPECT_EQ(http.seen.size(), 4u);  // exchange, stats (reviews were acked), notes, decks
   EXPECT_FALSE(engine.hasPending(a));
   EXPECT_EQ(engine.loadDecks(a.id).size(), 1u);
+}
+
+size_t mediaRequests(const FakeHttp& http) {
+  return static_cast<size_t>(std::count_if(http.seen.begin(), http.seen.end(), [](const FakeHttp::Seen& s) {
+    return s.url.find("/media/") != std::string::npos;
+  }));
+}
+
+TEST(AnkiSyncEngine, FetchesCardAudioOnceOnBoardsWithASpeaker) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  AnkiAccount a = testAccount();
+  http.responses["POST /v1/p/alice/exchange"] = {200, kExchangeResponse};
+  http.responses["GET /v1/p/alice/media/a.wav"] = {200, std::string("RIFF\0\1\2", 7)};
+
+  EXPECT_EQ(engine.syncAccount(a, true).mediaFetched, 0u) << "no speaker: nothing is fetched";
+  EXPECT_EQ(mediaRequests(http), 0u);
+
+  engine.fetchAudio = true;
+  EXPECT_EQ(engine.syncAccount(a, false).mediaFetched, 0u) << "only the review account plays cards";
+  EXPECT_EQ(engine.syncAccount(a, true).mediaFetched, 1u);
+  ASSERT_EQ(mediaRequests(http), 1u) << "b.png is not audio";
+  EXPECT_EQ(http.seen.back().headers.size(), 1u);
+  EXPECT_EQ(http.seen.back().headers[0].second, "Bearer akd_x");
+  AnkiCardCache cache(fs, ankipaths::cardsFile(a.id), ankipaths::cacheMetaFile(a.id));
+  AnkiCard c;
+  ASSERT_TRUE(cache.load(0, c));
+  EXPECT_EQ(c.a, "back \"one\"[sound:a.wav]") << "playable media becomes a marker on the answer";
+  const std::string path = ankimedia::path(a.id, "a.wav");
+  EXPECT_EQ(fs.files[path], std::string("RIFF\0\1\2", 7));
+  EXPECT_FALSE(fs.exists(path + ".tmp"));
+
+  EXPECT_EQ(engine.syncAccount(a, true).mediaFetched, 0u);
+  EXPECT_EQ(mediaRequests(http), 1u) << "a cached file is not fetched again";
+}
+
+TEST(AnkiSyncEngine, SoundOfAQuestionWithoutTextPlaysWithTheQuestion) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  engine.fetchAudio = true;
+  AnkiAccount a = testAccount();
+  http.responses["POST /v1/p/alice/exchange"] = {
+      200,
+      R"({"reviews":[],"cards":[{"card_id":7,"deck":"D","q":" \n","a":"huis","media":["huis.mp3"],"kind":"new"}]})"};
+  ASSERT_TRUE(engine.exchange(a, true).ok);
+  AnkiCardCache cache(fs, ankipaths::cardsFile(a.id), ankipaths::cacheMetaFile(a.id));
+  AnkiCard c;
+  ASSERT_TRUE(cache.load(0, c));
+  EXPECT_EQ(c.q, " \n[sound:huis.mp3]");
+  EXPECT_EQ(c.a, "huis");
+}
+
+TEST(AnkiSyncEngine, SoundsGoToTheSideTheServerNames) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  engine.fetchAudio = true;
+  AnkiAccount a = testAccount();
+  http.responses["POST /v1/p/alice/exchange"] = {
+      200, R"({"reviews":[],"cards":[)"
+           R"({"card_id":7,"deck":"D","q":"het huis","a":"house","media":["huis.mp3","house.mp3","p.png"],)"
+           R"("q_sounds":["huis.mp3"],"a_sounds":["house.mp3","huis.mp3"],"kind":"new"},)"
+           R"({"card_id":8,"deck":"D","q":"de fiets","a":"bike","media":["fiets.mp3"],"a_sounds":["fiets.mp3"]},)"
+           R"({"card_id":9,"deck":"D","q":"oud","a":"old","media":["oud.mp3"]}]})"};
+  ASSERT_TRUE(engine.exchange(a, true).ok);
+  AnkiCardCache cache(fs, ankipaths::cardsFile(a.id), ankipaths::cacheMetaFile(a.id));
+  AnkiCard c;
+  ASSERT_TRUE(cache.load(0, c));
+  EXPECT_EQ(c.q, "het huis[sound:huis.mp3]");
+  EXPECT_EQ(c.a, "house[sound:house.mp3][sound:huis.mp3]") << "a sound named on both sides plays on both";
+  EXPECT_EQ(c.mediaCount, 3);
+  ASSERT_TRUE(cache.load(1, c));
+  EXPECT_EQ(c.q, "de fiets");
+  EXPECT_EQ(c.a, "bike[sound:fiets.mp3]");
+  ASSERT_TRUE(cache.load(2, c));
+  EXPECT_EQ(c.q, "oud") << "no side from the server: the sound plays with the answer";
+  EXPECT_EQ(c.a, "old[sound:oud.mp3]");
+}
+
+TEST(AnkiSyncEngine, FailedAudioDownloadLeavesNoFile) {
+  MemFs fs;
+  FakeHttp http;
+  AnkiSyncEngine engine(fs, http, nullptr);
+  engine.fetchAudio = true;
+  AnkiAccount a = testAccount();
+  http.responses["POST /v1/p/alice/exchange"] = {200, kExchangeResponse};
+  http.responses["GET /v1/p/alice/media/a.wav"] = {404, R"({"error":{"code":"media_not_found"}})"};
+  const auto r = engine.syncAccount(a, true);
+  EXPECT_TRUE(r.ok) << "audio never fails the session";
+  EXPECT_EQ(r.mediaFetched, 0u);
+  EXPECT_FALSE(fs.exists(ankimedia::path(a.id, "a.wav")));
+  EXPECT_FALSE(fs.exists(ankimedia::path(a.id, "a.wav") + ".tmp"));
 }
 
 // Reviews per day: 4 yesterday, 2 today (reviewed_today > 0 makes the newest
