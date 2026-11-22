@@ -624,7 +624,7 @@ whole afterwards.
 - **Board.** `ws397` builds for the Waveshare ESP32-S3-ePaper-3.97. The board
   code is upstream's open PR (crosspoint-reader#3386) applied as is. Its SDK
   part (freeink-sdk#218) is not in our pinned SDK, so
-  `lib/hal/HalBoardCompat.h` carries the one helper the firmware calls,
+  `src/util/BoardCompat.h` carries the one helper the firmware calls,
   `hasHorizontalKeys()`. Delete that file when the pin moves past #218. The
   refresh tuning from #218 is not here.
 - **Three keys.** The board has Up, OK, Down and BOOT (Back). Review grades by
