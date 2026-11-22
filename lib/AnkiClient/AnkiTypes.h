@@ -76,6 +76,7 @@ struct AnkiSyncResult {
   size_t notesSent = 0;
   size_t notesAcked = 0;
   size_t cardsFetched = 0;
+  size_t mediaFetched = 0;  // card audio files downloaded
   size_t decksFetched = 0;  // > 0 when this step already refreshed the deck cache
   AnkiCounts counts;
   std::string syncError;  // AnkiDo's inline-sync error (exchange only), informational

@@ -98,6 +98,9 @@ std::vector<Run> parse(const std::string& input) {
         r.italic = italic;
         if (inner.rfind("img:", 0) == 0) {
           r.text = "[image]";
+        } else if (inner.rfind("sound:", 0) == 0) {
+          r.text = inner.substr(6);
+          r.sound = true;
         } else {
           r.text = inner;
           r.cloze = true;
@@ -118,7 +121,7 @@ std::string toPlain(const std::string& text) {
   for (const Run& r : parse(text)) {
     if (r.newline) {
       out.push_back('\n');
-    } else if (r.typeIn) {
+    } else if (r.typeIn || r.sound) {
       continue;
     } else if (r.cloze) {
       out += "[" + r.text + "]";

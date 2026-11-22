@@ -37,6 +37,12 @@ const DEVICES = [
     firstInstallNote: true,
   },
   {
+    id: 'ws397', name: 'Waveshare ESP32-S3-ePaper-3.97', chip: 'ESP32-S3',
+    resetAfterFlash: true,
+    bootSteps: ['The flasher has restarted the board; CrossPoint starts on its own.'],
+    firstInstallNote: true,
+  },
+  {
     id: 'papermono', name: 'M5 PaperMono', chip: 'ESP32-S3',
     bootSteps: ['Press the power button to boot the device.'],
     firstInstallNote: true,

@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <BlePageTurner.h>
+#include <BoardConfig.h>
 #include <Epub/ReaderRenderSpec.h>
 #include <PersistableStore.h>
 
@@ -461,7 +462,10 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   void* sdFontResolverCtx = nullptr;
 
   uint16_t getPowerButtonDuration() const {
-    return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP) ? 10 : 400;
+    // Where Back is the power key (Waveshare 3.97), a 10 ms sleep would swallow every Back press.
+    const bool backIsPower = BoardConfig::ACTIVE.input.back == BoardConfig::ACTIVE.input.power &&
+                             BoardConfig::ACTIVE.input.back != BoardConfig::PIN_UNASSIGNED;
+    return (shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP && !backIsPower) ? 10 : 400;
   }
   int getReaderFontId() const;
 

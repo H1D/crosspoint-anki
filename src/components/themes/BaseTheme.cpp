@@ -1,6 +1,5 @@
 #include "BaseTheme.h"
 
-#include <BoardConfig.h>
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
@@ -26,6 +25,7 @@
 #include "components/icons/cover.h"
 #include "components/icons/headerIcons.h"
 #include "fontIds.h"
+#include "util/BoardCompat.h"
 
 void BaseTheme::setCheckboxRow(freeink::ui::ListItem& item, const bool checked) {
   item.value = nullptr;
@@ -214,9 +214,11 @@ void BaseTheme::drawHintLabel(const GfxRenderer& renderer, const int fontId, con
   }
 }
 
+bool BaseTheme::buttonHintsHidden() { return gpio.hasTouch() || !BoardConfig::hasHorizontalKeys(); }
+
 void BaseTheme::drawButtonHints(GfxRenderer& renderer, const char* btn1, const char* btn2, const char* btn3,
                                 const char* btn4) const {
-  if (gpio.hasTouch()) {
+  if (buttonHintsHidden()) {
     return;
   }
 

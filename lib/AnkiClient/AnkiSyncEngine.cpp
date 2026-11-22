@@ -1,7 +1,10 @@
 #include "AnkiSyncEngine.h"
 
+#include <algorithm>
+
 #include "AnkiCardCache.h"
 #include "AnkiJson.h"
+#include "AnkiMedia.h"
 #include "AnkiNoteQueue.h"
 #include "AnkiPaths.h"
 #include "AnkiStats.h"
@@ -115,8 +118,12 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchangeAnkiDo(const AnkiAccount& account
   std::string topKey;
   AnkiCard card;
   int nextIndex = -1;
-  bool inMediaArray = false;
-  int cardDepth = 0;  // reader depth at which a card object starts
+  // This card's media names, and its sounds per side when the server lists them.
+  std::vector<std::string> media;
+  std::vector<std::string> sounds[2];         // question, answer
+  bool sided = false;                         // the card has "q_sounds" or "a_sounds"
+  std::vector<std::string>* names = nullptr;  // the array being read
+  int cardDepth = 0;                          // reader depth at which a card object starts
   std::string reviewClientId;
   // Inside "sync": {"error": {"code":..,"message":..}}
   std::string syncErrCode;
@@ -144,6 +151,10 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchangeAnkiDo(const AnkiAccount& account
     depth++;
     if (section == Section::Cards && depth == 2) {
       card = AnkiCard();
+      media.clear();
+      sounds[0].clear();
+      sounds[1].clear();
+      sided = false;
       cardDepth = depth;
     }
     if (section == Section::Reviews && depth == 2) reviewClientId.clear();
@@ -151,6 +162,15 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchangeAnkiDo(const AnkiAccount& account
   cb.onObjectEnd = [&]() {
     if (section == Section::Cards && depth == cardDepth && cardsOut) {
       if (card.cardId != 0) {
+        if (fetchAudio && sided) {
+          card.q += ankimedia::markers(sounds[0], card.q);
+          card.a += ankimedia::markers(sounds[1], card.a);
+        } else if (fetchAudio && !media.empty()) {
+          // An AnkiDo up to 0.4.0 does not say which side a sound belongs to:
+          // it plays with the answer, or with a question that shows no text.
+          const bool blankQuestion = card.q.find_first_not_of(" \t\r\n") == std::string::npos;
+          (blankQuestion ? card.q : card.a) += ankimedia::markers(media, card.q + card.a);
+        }
         const std::string line = AnkiCardCache::toLine(card);
         if (cardsOut->write(line) != line.size()) writeFailed = true;
         r.cardsFetched++;
@@ -167,20 +187,25 @@ AnkiSyncEngine::Result AnkiSyncEngine::exchangeAnkiDo(const AnkiAccount& account
       if (key == "next")
         nextIndex = 0;
       else if (key == "media")
-        inMediaArray = true;
+        names = &media;
+      else if (key == "q_sounds" || key == "a_sounds") {
+        names = &sounds[key[0] == 'q' ? 0 : 1];
+        sided = true;
+      }
     }
   };
   cb.onArrayEnd = [&]() {
     nextIndex = -1;
-    inMediaArray = false;
+    names = nullptr;
   };
   cb.onString = [&](const std::string& v) {
     if (section == Section::Cards && cardDepth != 0) {
       if (nextIndex >= 0) {
         if (nextIndex < 4) card.next[nextIndex] = v;
         nextIndex++;
-      } else if (inMediaArray) {
-        card.mediaCount++;
+      } else if (names) {
+        if (names == &media) card.mediaCount++;
+        names->push_back(v);
       } else if (depth == cardDepth) {
         if (key == "deck")
           card.deck = v;
@@ -478,15 +503,66 @@ AnkiSyncEngine::Result AnkiSyncEngine::syncAccount(const AnkiAccount& account, b
   }
   if (total.error.empty()) total.error = notes.error;  // per-note failure text, informational
 
-  if (total.decksFetched > 0) return total;  // AnkiConnect refreshes the deck cache while fetching the queue
-
-  const Result decks = fetchDecks(account);
-  if (!decks.ok) {
+  // AnkiConnect refreshes the deck cache while fetching the queue.
+  if (total.decksFetched == 0) {
+    const Result decks = fetchDecks(account);
     // Deck list is a convenience; a failure here does not fail the session,
     // but surface it when nothing else went wrong.
-    if (total.error.empty()) total.error = decks.error;
+    if (!decks.ok && total.error.empty()) total.error = decks.error;
   }
+  if (wantCards && fetchAudio) total.mediaFetched = fetchMedia(account);
   return total;
+}
+
+size_t AnkiSyncEngine::fetchMedia(const AnkiAccount& account) {
+  if (account.isAnkiConnect()) return 0;
+  std::vector<std::string> names;
+  {
+    auto cards = fs.open(ankipaths::cardsFile(account.id), AnkiFs::Mode::Read);
+    if (!cards) return 0;
+    AnkiLineReader lines(*cards);
+    std::string line;
+    AnkiCard card;
+    while (lines.next(line)) {
+      if (!AnkiCardCache::parseLine(line, card)) continue;
+      ankimedia::soundNames(card.q, names);
+      ankimedia::soundNames(card.a, names);
+    }
+    cards->close();
+  }
+  std::sort(names.begin(), names.end());
+  names.erase(std::unique(names.begin(), names.end()), names.end());
+
+  // ponytail: files of cards that left the queue stay on the SD card until the
+  // account is deleted; prune here if a media folder ever grows too large.
+  size_t fetched = 0;
+  fs.mkdirs(ankipaths::mediaDir(account.id));
+  for (const std::string& name : names) {
+    if (shouldStop && shouldStop()) break;
+    const std::string path = ankimedia::path(account.id, name);
+    if (!ankimedia::isPlayable(name) || fs.exists(path)) continue;
+    const std::string tmp = path + ".tmp";
+    auto out = fs.open(tmp, AnkiFs::Mode::Write);
+    if (!out) break;
+    size_t size = 0;
+    bool written = true;
+    const int status = http.request("GET", account.apiBase() + "/media/" + ankimedia::urlEncode(name),
+                                    {{"Authorization", "Bearer " + account.token}}, "",
+                                    [&](int httpStatus, const uint8_t* data, size_t len) {
+                                      if (httpStatus < 200 || httpStatus >= 300) return true;
+                                      size += len;
+                                      written = size <= ankimedia::MAX_BYTES && out->write(data, len) == len;
+                                      return written;
+                                    });
+    const bool closed = out->close();
+    if (status >= 200 && status < 300 && written && closed && size > 0 && fs.rename(tmp, path)) {
+      fetched++;
+      continue;
+    }
+    fs.remove(tmp);
+    if (status <= 0 || status == 401 || status == 403) break;  // no server or no access: the rest would fail too
+  }
+  return fetched;
 }
 
 namespace ankidecks {

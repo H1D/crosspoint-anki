@@ -20,6 +20,7 @@
 #include "anki/AnkiSecureHttp.h"
 #include "anki/AnkiStorageFs.h"
 #include "fontIds.h"
+#include "util/BoardCompat.h"
 
 namespace {
 
@@ -199,11 +200,15 @@ void AnkiDashboardActivity::loop() {
     }
     return;
   }
+  // A side rocker stands in for the front Left/Right keys a board lacks.
+  const bool sideRocker = !mappedInput.hasTouch() && !BoardConfig::hasHorizontalKeys();
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     run(study.reviewable > 0 ? Action::Review : Action::Sync);
-  } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+  } else if (mappedInput.wasReleased(sideRocker ? MappedInputManager::Button::Down
+                                                : MappedInputManager::Button::Right)) {
     run(Action::Sync);
-  } else if (severalAccounts && mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+  } else if (severalAccounts &&
+             mappedInput.wasReleased(sideRocker ? MappedInputManager::Button::Up : MappedInputManager::Button::Left)) {
     run(Action::Account);
   }
 }

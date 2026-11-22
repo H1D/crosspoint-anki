@@ -5,8 +5,8 @@
 
 // Helpers for AnkiDo's compact text markup (render=text):
 //   **bold**  _italic_  [cloze]  [img:name.png]  \n
-// plus Anki's own "[[type:Field]]" type-in-the-answer marker, and for the odd
-// characters AnkiDo passes through from Anki.
+// the device's own "[sound:name.mp3]" marker (see AnkiMedia.h), plus Anki's own "[[type:Field]]" type-in-the-answer
+// marker, and for the odd characters AnkiDo passes through from Anki.
 namespace ankimarkup {
 
 struct Run {
@@ -17,13 +17,15 @@ struct Run {
   bool newline = false;  // a line break; text is empty
   bool typeIn = false;   // "[[type:...]]" marker; text holds the spec after "type:"
   bool mark = false;     // draw inverted (a type-in comparison error)
+  bool sound = false;    // "[sound:name]" marker; text holds the file name, nothing is drawn
 };
 
 // Removes Unicode bidi isolate/embedding controls (U+2066..U+2069,
 // U+202A..U+202E) that Anki's "next" strings carry and the fonts cannot draw.
 std::string stripBidiControls(const std::string& s);
 
-// Splits card text into styled runs. Image markers become "[image]" runs;
+// Splits card text into styled runs. Image markers become "[image]" runs and
+// sound markers become sound runs;
 // unknown/unbalanced markers are kept as literal text.
 // "[[type:spec]]" becomes one typeIn run (never a cloze box).
 std::vector<Run> parse(const std::string& text);

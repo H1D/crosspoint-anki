@@ -28,6 +28,9 @@ jobs:
           - release_env: sticky-gh_release
             rc_env: sticky-gh_release_rc
             device: sticky
+          - release_env: ws397-gh_release
+            rc_env: ws397-gh_release_rc
+            device: ws397
           - release_env: x4pro-gh_release
             rc_env: x4pro-gh_release_rc
             device: x4pro
@@ -171,10 +174,10 @@ jobs:
           RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           version="${RELEASE_TAG#v}"
-          for device in x3-x4 sticky x4pro x4c papermono metalio_eink4 eego_a4 picco; do
+          for device in x3-x4 sticky ws397 x4pro x4c papermono metalio_eink4 eego_a4 picco; do
             test -f "dist/crosspoint-${version}-${device}.bin"
           done
-          test "$(find dist -maxdepth 1 -type f -name 'crosspoint-*.bin' | wc -l)" -eq 8
+          test "$(find dist -maxdepth 1 -type f -name 'crosspoint-*.bin' | wc -l)" -eq 9
           test -s dist/LICENSE
           gh release upload "$RELEASE_TAG" dist/crosspoint-*.bin dist/LICENSE \
             --repo "$GITHUB_REPOSITORY" --clobber

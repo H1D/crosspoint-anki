@@ -18,6 +18,7 @@ lib/AnkiClient/          host-testable core (no Arduino types, no ArduinoJson)
   AnkiJournal.*          pending reviews (reviews.jsonl)
   AnkiNoteQueue.*        pending add-word notes (notes.jsonl) + ankinote:: builders
   AnkiCardCache.*        cached queue (cards.jsonl + cache.json)
+  AnkiMedia.*            card audio: "[sound:name]" markers, SD path of a media file
   AnkiStats.*            reviews per day for the dashboard (stats.json): wire parsers, day anchor,
                          merge with the journal, streak, heatmap levels
   AnkiVocabulary.*       looked-up words (upstream's /Vocabulary.txt): record parser, row key, note fields,
@@ -38,6 +39,7 @@ src/anki/                firmware side
                          AnkiReviewActivity, AnkiSyncActivity              (agent: review)
   AnkiAddNoteActivity.*  add-word modal                                    (agent: add-word)
   AnkiVocabularyActivity.*  Send Words to Anki table (reader menu)
+  AnkiAudio.*            plays a cached .mp3/.wav through lib/hal/HalAudio (boards with a speaker)
 ```
 
 ## Using the core from an activity
@@ -111,6 +113,7 @@ reviews.jsonl  grades not yet acknowledged            review screen appends, eng
 notes.jsonl    add-word notes not yet sent            add-word appends, engine rewrites
 decks.json     deck list from the last sync           engine (sync)
 stats.json     reviews per day from the last fetch    engine (sync, and after every acked exchange)
+media/         card audio, one file per sound         engine (sync of the review account, speaker boards)
 ```
 
 Backends: `account.backend` (`AnkiBackend::AnkiDo` or `AnkiConnect`) decides
