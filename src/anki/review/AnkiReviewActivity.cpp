@@ -5,7 +5,6 @@
 #include <AnkiTypeAnswer.h>
 #include <FontCacheManager.h>
 #include <GfxRenderer.h>
-#include <HalBoardCompat.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 #include <Logging.h>
@@ -23,6 +22,7 @@
 #include "anki/AnkiStorageFs.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BoardCompat.h"
 
 namespace {
 

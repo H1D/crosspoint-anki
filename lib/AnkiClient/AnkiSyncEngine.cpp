@@ -554,8 +554,8 @@ size_t AnkiSyncEngine::fetchMedia(const AnkiAccount& account) {
                                       written = size <= ankimedia::MAX_BYTES && out->write(data, len) == len;
                                       return written;
                                     });
-    out->close();
-    if (status >= 200 && status < 300 && written && size > 0 && fs.rename(tmp, path)) {
+    const bool closed = out->close();
+    if (status >= 200 && status < 300 && written && closed && size > 0 && fs.rename(tmp, path)) {
       fetched++;
       continue;
     }

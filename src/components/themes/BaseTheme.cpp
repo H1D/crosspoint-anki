@@ -2,7 +2,6 @@
 
 #include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
-#include <HalBoardCompat.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
 #include <HalPowerManager.h>
@@ -26,6 +25,7 @@
 #include "components/icons/cover.h"
 #include "components/icons/headerIcons.h"
 #include "fontIds.h"
+#include "util/BoardCompat.h"
 
 void BaseTheme::setCheckboxRow(freeink::ui::ListItem& item, const bool checked) {
   item.value = nullptr;

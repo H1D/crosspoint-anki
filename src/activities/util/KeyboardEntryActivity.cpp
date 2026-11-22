@@ -1,7 +1,6 @@
 #include "KeyboardEntryActivity.h"
 
 #include <BidiUtils.h>
-#include <HalBoardCompat.h>
 #include <HalGPIO.h>
 #include <I18n.h>
 
@@ -13,6 +12,7 @@
 #include "MappedInputManager.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
+#include "util/BoardCompat.h"
 
 namespace fui = freeink::ui;
 

@@ -14,6 +14,8 @@ jobs:
             asset: firmware.bin
           - pio_env: sticky-gh_release_rc
             asset: firmware-sticky.bin
+          - pio_env: ws397-gh_release_rc
+            asset: firmware-ws397.bin
           - pio_env: x4pro-gh_release_rc
             asset: firmware-x4pro.bin
           - pio_env: x4c-gh_release_rc

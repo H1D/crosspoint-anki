@@ -117,7 +117,11 @@ class SoundStream {
         sampleRate = le32(buf + 4);
         if (!pcm16 || channels < 1 || channels > 2 || sampleRate == 0) return false;
       }
-      next += 8 + size + (size & 1);  // chunks are word-aligned
+      // Chunks are word-aligned. A length past the end of the file is corrupt
+      // and could wrap `next` back to an earlier chunk.
+      const uint64_t after = static_cast<uint64_t>(next) + 8 + size + (size & 1);
+      if (after > file.size()) return false;
+      next = static_cast<size_t>(after);
     }
     return false;
   }
